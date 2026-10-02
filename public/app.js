@@ -38,9 +38,81 @@ let lastGoodAt = 0;
 async function api(path, body) {
   const res = await fetch(path, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : undefined);
   const json = await res.json().catch(() => ({}));
+  if (res.status === 401) location.replace('/login'); // session ended: back to sign-in
   if (!res.ok) throw new Error(json.error?.message || json.error || `${res.status} ${res.statusText}`);
   return json;
 }
+
+// ── who is signed in ────────────────────────────────────────────────────────
+const ROLE = { admin: 'Admin', operator: 'Operator', viewer: 'Viewer' };
+const initials = name => { const p = String(name).split('@')[0].split(/[._\-\s]+/).filter(Boolean); return ((p[0]?.[0] || '') + (p[1]?.[0] || p[0]?.[1] || '')).toUpperCase() || '?'; };
+const remembered = () => { try { return JSON.parse(localStorage.getItem('tc-accounts')) || []; } catch { return []; } };
+let me = null;
+
+async function loadSession() {
+  const s = await api('/api/session');
+  if (!s.user) { location.replace('/login'); return; }
+  me = s.user;
+  document.body.classList.toggle('viewer', me.role === 'viewer');
+  renderMe();
+  if (me.role === 'admin') { await renderSignins(); } else {
+    $('#signins-table').replaceChildren(h('p', { class: 'muted' }, 'Only admins can see and manage dashboard sign-ins.'));
+  }
+}
+
+// Switching signs this account out first: one session per browser.
+async function switchTo(hash) {
+  await fetch('/api/session', { method: 'DELETE' });
+  location.href = `/login${hash}`;
+}
+
+function renderMe() {
+  $('#me').hidden = false;
+  $('#me-av').textContent = initials(me.name);
+  $('#me-name').textContent = me.name;
+  const others = remembered().filter(a => a.name !== me.name);
+  $('#me-list').replaceChildren(
+    h('div', { class: 'hd' }, h('span', { class: 'av av-sm' }, initials(me.name)), h('div', {}, h('b', {}, me.name), h('span', { class: 'muted' }, `${ROLE[me.role] || me.role}${me.lastSignInAt ? `, signed in ${ago(me.lastSignInAt, Date.now())}` : ''}`))),
+    h('p', { class: 'lbl' }, 'Switch to'),
+    ...others.map(a => h('button', { type: 'button', class: 'acc', onclick: () => switchTo(`#account=${encodeURIComponent(a.name)}`) }, h('span', { class: 'av' }, initials(a.name)), h('b', {}, a.name), h('span', { class: 'muted role' }, ROLE[a.role] || a.role || ''))),
+    h('button', { type: 'button', class: 'acc add', onclick: () => switchTo('#other') }, h('span', { class: 'av plus' }, '+'), h('b', {}, 'Use another account')),
+    h('button', { type: 'button', class: 'out', onclick: () => switchTo('') }, 'Sign out'),
+  );
+}
+
+// ── dashboard sign-ins (admins) ─────────────────────────────────────────────
+async function renderSignins() {
+  const { users } = await api('/api/accounts');
+  $('#signin-add').hidden = false;
+  const now = Date.now();
+  $('#signins-table').replaceChildren(h('div', { class: 'ledger' },
+    h('div', { class: 'srow head' }, h('div'), h('div', {}, 'Name'), h('div', { class: 'role' }, 'Role'), h('div', { class: 'when' }, 'Last sign-in'), h('div')),
+    ...users.map(u => h('div', { class: 'srow' },
+      h('span', { class: 'av' }, initials(u.name)),
+      h('div', { class: 'name' }, u.name, u.name === me.name ? h('span', { class: 'muted' }, ' (you)') : null),
+      h('div', { class: 'role' }, ROLE[u.role] || u.role),
+      h('div', { class: 'when muted' }, u.lastSignInAt ? ago(u.lastSignInAt, now) : 'never'),
+      h('div', { class: 'row' },
+        h('button', { class: 'btn small', type: 'button', onclick: () => { const p = prompt(`New password for ${u.name} (8+ characters). They will be signed out everywhere.`); if (p) signinAction({ action: 'reset', name: u.name, password: p }); } }, 'Reset password'),
+        u.name === me.name ? null : h('button', { class: 'btn small', type: 'button', onclick: () => { if (confirm(`Remove ${u.name}'s sign-in? They are signed out immediately.`)) signinAction({ action: 'remove', name: u.name }); } }, 'Remove'),
+      ),
+    )),
+  ));
+}
+async function signinAction(body) {
+  const note = $('#signin-note');
+  try {
+    await api('/api/accounts', body);
+    note.className = 'result good';
+    note.textContent = body.action === 'add' ? `Added ${body.name}. Tell them their temporary password and ask them to have it reset once they are in.` : body.action === 'reset' ? `Password for ${body.name} reset.` : `Removed ${body.name}.`;
+    await renderSignins();
+  } catch (err) { note.className = 'result err'; note.textContent = err.message; }
+}
+$('#signin-add').addEventListener('submit', async e => {
+  e.preventDefault();
+  await signinAction({ action: 'add', name: $('#signin-name').value.trim(), role: $('#signin-role').value, password: $('#signin-pass').value });
+  $('#signin-name').value = ''; $('#signin-pass').value = '';
+});
 
 async function refresh() {
   try {
@@ -591,6 +663,7 @@ let resizeTimer, renderedWidth = innerWidth;
 window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (innerWidth !== renderedWidth && last) { renderedWidth = innerWidth; render(last); } }, 150); });
 showPage();
 
+await loadSession();
 await loadActivity();
 refresh();
 setInterval(async () => { await loadActivity(); refresh(); }, 10_000);

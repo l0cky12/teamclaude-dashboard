@@ -32,5 +32,19 @@ test('usageReport totals, per account, unpriced share, savings and bins', () => 
   assert.equal(r.accounts['c@x'].cost, 0);
   assert.equal(r.models.codex.priced, false);
   assert.deepEqual(r.bins.map(b => b.cost), [0.4, 0]);
-  assert.deepEqual(r.bins[0].accounts, { 'a@x': 0.4 });
+  assert.deepEqual({ ...r.bins[0].accounts }, { 'a@x': 0.4 });
+});
+
+test('usageReport keeps accounts whose names match object prototype properties', () => {
+  const names = ['constructor', 'toString', '__proto__'];
+  const accounts = Object.fromEntries(names.map(name => [name, { requests: 1, input: 1e6, output: 0, cacheRead: 0, cacheWrite: 0 }]));
+  const r = usageReport([{ at: 1, accounts }], { since: 0, until: 2, binMs: 2 });
+  assert.deepEqual(Object.keys(r.accounts), names);
+  for (const name of names) {
+    assert.equal(r.accounts[name].cost, 4);
+    assert.equal(r.accounts[name].requests, 1);
+    assert.equal(r.bins[0].accounts[name], 4);
+  }
+  assert.equal(r.total.cost, 12);
+  assert.equal(Object.hasOwn(Object.prototype, 'cost'), false);
 });

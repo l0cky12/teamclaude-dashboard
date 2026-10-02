@@ -102,18 +102,22 @@ function renderBell(accounts, opts) {
     $('#bell-live').dataset.n = list.length;
     $('#bell-live').textContent = label;
   }
-  // don't pull focus out from under someone tabbing through the open list
-  if ($('#bell').open && $('#bell').contains(document.activeElement) && document.activeElement.tagName !== 'SUMMARY') return;
+  // Keep keyboard focus while refreshing the alerts, including resolved accounts.
+  const focusedAccount = $('#bell').contains(document.activeElement) ? document.activeElement.dataset.account : null;
   $('#bell-list').replaceChildren(
     h('h2', {}, list.length ? `${list.length} account${list.length === 1 ? ' has' : 's have'} a problem` : 'No problems'),
     ...(list.length ? list.map(({ account: a, items }) => h('div', { class: 'attn-item' },
       h('span', { class: `dot ${items[0].level}`, title: items[0].level }),
       h('div', {}, h('div', { class: 'who' }, a.name), ...items.map(i => h('div', { class: 'what' }, i.text))),
       items.some(i => i.action === 'signin')
-        ? h('button', { class: 'btn small primary', type: 'button', onclick: () => openSignin(a.provider || 'anthropic', a.name) }, 'Sign in')
+        ? h('button', { class: 'btn small primary', type: 'button', 'data-account': a.name, onclick: () => openSignin(a.provider || 'anthropic', a.name) }, 'Sign in')
         : h('span'),
     )) : [h('p', { class: 'ok' }, h('span', { class: 'dot good' }), 'Every account is signed in and usable.')]),
   );
+  if (focusedAccount != null) {
+    const button = [...$('#bell-list').querySelectorAll('button')].find(b => b.dataset.account === focusedAccount);
+    (button || $('#bell summary')).focus({ preventScroll: true });
+  }
 }
 
 function renderLeft(accounts, now, threshold) {
@@ -475,8 +479,7 @@ function renderCost(s) {
     r = usageReport(all ? [all] : [], { since: 0 });
   } else {
     binMs = Number(range) > 86400e3 ? 6 * 3600e3 : 3600e3;
-    const n = Number(range) / binMs;
-    const since = Math.floor(now / 3600e3) * 3600e3 - (n - 1) * binMs;
+    const since = now - Number(range);
     r = usageReport(ticks, { since, until: now, binMs });
   }
   const t = r.total;

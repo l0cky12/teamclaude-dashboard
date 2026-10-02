@@ -9,7 +9,14 @@ const snap = (req, cacheRead, clients = {}) => ({
 
 test('tick records positive deltas per account and client', () => {
   const t = tick(snap(10, 1000, { liam: { requests: 2, inputTokens: 100, outputTokens: 10 } }), snap(13, 1500, { liam: { requests: 5, inputTokens: 160, outputTokens: 30 } }), 42);
-  assert.deepEqual(t, { at: 42, accounts: { 'a@x': { requests: 3, tokens: 500 } }, clients: { liam: { requests: 3, inputTokens: 60, outputTokens: 20 } } });
+  assert.deepEqual(t, { at: 42, accounts: { 'a@x': { requests: 3, tokens: 500, input: 0, output: 0, cacheRead: 500, cacheWrite: 0 } }, clients: { liam: { requests: 3, inputTokens: 60, outputTokens: 20 } } });
+});
+
+test('tick keeps the per-bucket cache split and marks Codex accounts', () => {
+  const at = (cr, fable) => ({ accounts: [{ name: 'c@x', provider: 'codex', usage: { totalRequests: cr, totalCacheReadTokens: cr, byBucket: { unified7dFable: { cacheReadTokens: fable, cacheCreationTokens: 0 } } } }] });
+  const t = tick(at(10, 4), at(30, 9), 1);
+  assert.deepEqual(t.accounts['c@x'].buckets, { unified7dFable: { cacheRead: 5, cacheWrite: 0 } });
+  assert.equal(t.accounts['c@x'].provider, 'codex');
 });
 
 test('tick is null when nothing changed or on first poll', () => {
@@ -37,4 +44,16 @@ test('totals and select', () => {
   assert.equal(select(ticks, { since: 2 }).length, 2);
   assert.deepEqual(select(ticks, { who: 'liam' }).map(t => t.at), [1, 2]);
   assert.deepEqual(select(ticks, { who: 'b@x' }).map(t => t.at), [2]);
+});
+
+test('names matching object prototype properties are kept and matched exactly', () => {
+  const names = ['constructor', 'toString', '__proto__'];
+  const snapAll = n => ({ accounts: names.map(name => ({ name, usage: { totalRequests: n } })), clients: Object.fromEntries(names.map(name => [name, { requests: n }])) });
+  const t = tick(snapAll(0), snapAll(1), 1);
+  assert.deepEqual(Object.keys(t.accounts), names);
+  assert.deepEqual(Object.keys(t.clients), names);
+  assert.deepEqual(Object.keys(totals([t], 'accounts')), names);
+  assert.equal(totals([t], 'clients').__proto__.requests, 1);
+  assert.equal(Object.hasOwn(Object, 'requests'), false);
+  assert.equal(select([{ at: 1, accounts: { 'a@x': {} }, clients: {} }], { who: 'toString' }).length, 0);
 });

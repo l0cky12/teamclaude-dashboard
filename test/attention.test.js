@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { attention, meters, severity, nextReset, sortForAttention, formatDuration } from '../lib/attention.js';
+import { attention, meters, severity, nextReset, sortForAttention, formatDuration, remaining, issues } from '../lib/attention.js';
 
 const now = 1_800_000_000_000;
 const base = { name: 'a@x', status: 'active', unavailable: null, quota: { unified7d: 0.72, unified7dReset: now + 3 * 86400e3, unified7dFable: 0.67, unified7dFableReset: now + 3 * 86400e3 }, auth: { hasRefreshToken: true } };
@@ -60,4 +60,36 @@ test('formatDuration', () => {
   assert.equal(formatDuration(5 * 60e3), '5m');
   assert.equal(formatDuration(3.5 * 3600e3), '3h 30m');
   assert.equal(formatDuration(49 * 3600e3), '2d 1h');
+});
+
+test('remaining pools unused capacity per window for one provider', () => {
+  const now = 1000;
+  const accounts = [
+    { name: 'a', quota: { unified5h: 0.25, unified5hReset: 5000, unified7d: 1.2, unified7dReset: 9000 } },
+    { name: 'b', quota: { unified5h: 0.5, unified5hReset: 3000 } },
+    { name: 'off', disabled: true, quota: { unified5h: 0 } },
+    { name: 'c', provider: 'codex', quota: { unified5h: 0 } },
+  ];
+  const [session, weekly] = remaining(accounts, 'anthropic', now);
+  assert.equal(session.left, 1.25);
+  assert.equal(session.count, 2);
+  assert.equal(session.nextResetAccount, 'b');
+  assert.equal(weekly.left, 0);
+  assert.equal(remaining(accounts, 'codex', now)[0].left, 1);
+});
+
+test('issues counts accounts with real problems, not near-limit ones', () => {
+  const accounts = [
+    { ...base, name: 'ok' },
+    { ...base, name: 'near', quota: { ...base.quota, unified7d: 0.95 } },
+    { ...base, name: 'broken', status: 'error', unavailable: 'error', credentialRejectedUntil: new Date(now + 60e3).toISOString() },
+    { ...base, name: 'limited', unavailable: 'throttled', rateLimitedUntil: new Date(now + 90e3).toISOString() },
+    { ...base, name: 'off', disabled: true, status: 'error' },
+  ];
+  const out = issues(accounts, { now });
+  assert.deepEqual(out.map(i => i.account.name), ['broken', 'limited']);
+  assert.equal(out[0].items.length, 2, 'one entry per account, all its problems inside');
+  assert.ok(out[0].items.every(i => i.kind === 'signin'));
+  assert.equal(out[1].items[0].kind, 'blocked');
+  assert.deepEqual(issues([{ ...base, name: 'near', quota: { unified7d: 0.95 } }], { now }), []);
 });

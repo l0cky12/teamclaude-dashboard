@@ -1,5 +1,6 @@
-import { meters, severity, attention, sortForAttention, formatDuration, nextReset } from '/lib/attention.js';
-import { totals, select } from '/lib/activity.js';
+import { meters, severity, issues, sortForAttention, formatDuration, nextReset, remaining } from '/lib/attention.js';
+import { tick, totals, select } from '/lib/activity.js';
+import { usageReport } from '/lib/cost.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const h = (tag, attrs = {}, ...children) => {
@@ -64,10 +65,12 @@ function render(s) {
   const up = s.server?.uptimeSeconds != null ? formatDuration(s.server.uptimeSeconds * 1000) : null;
   $('#proxy-line').textContent = `Proxy ${s.server?.version || ''}, up ${up || '—'}. ${accounts.length} accounts, switching at ${pct(threshold)}.` + (s.server?.updateAvailable ? ' An update is available.' : '');
 
-  renderAttention(accounts, { now, threshold });
+  renderBell(accounts, { now, threshold });
+  renderLeft(accounts, now, threshold);
   renderTide(accounts, now, threshold);
   renderUsers(s, now);
   renderLog(s);
+  renderCost(s);
 
   const ledger = $('#ledger');
   ledger.replaceChildren();
@@ -88,28 +91,58 @@ function render(s) {
   $('#foot').textContent = `Updated ${new Date(now).toLocaleTimeString()}. Accounts are stored in ${s.dashboard?.configPath || ''}`;
 }
 
-function renderAttention(accounts, opts) {
-  const root = $('#attention');
-  const items = accounts.flatMap(a => attention(a, opts).map(i => ({ ...i, account: a })));
-  items.sort((a, b) => (a.level === b.level ? 0 : a.level === 'critical' ? -1 : 1));
-  root.replaceChildren(h('h2', {}, items.length ? `Needs attention (${items.length})` : 'Needs attention'));
-  if (!items.length) {
-    root.append(h('p', { class: 'ok' }, h('span', { class: 'dot good' }), 'Every account is signed in and under its limits.'));
-    return;
+function renderBell(accounts, opts) {
+  const list = issues(accounts, opts);
+  const count = $('#bell-count');
+  count.hidden = !list.length;
+  count.textContent = list.length;
+  const label = list.length ? `${list.length} account${list.length === 1 ? '' : 's'} need${list.length === 1 ? 's' : ''} attention` : 'No account alerts';
+  $('#bell summary').setAttribute('aria-label', label);
+  if ($('#bell-live').dataset.n !== String(list.length)) { // announce changes only, not every refresh
+    $('#bell-live').dataset.n = list.length;
+    $('#bell-live').textContent = label;
   }
-  for (const i of items) {
-    root.append(h('div', { class: 'attn-item' },
-      h('span', { class: `dot ${i.level}`, title: i.level }),
-      h('div', {}, h('div', { class: 'who' }, i.account.name), h('div', { class: 'what' }, i.text)),
-      i.action === 'signin' ? h('button', { class: 'btn small primary', type: 'button', onclick: () => openSignin(i.account.provider || 'anthropic', i.account.name) }, 'Sign in again') : h('span'),
-    ));
+  // Keep keyboard focus while refreshing the alerts, including resolved accounts.
+  const focusedAccount = $('#bell').contains(document.activeElement) ? document.activeElement.dataset.account : null; // provider:name, as one email can be both
+  $('#bell-list').replaceChildren(
+    h('h2', {}, list.length ? `${list.length} account${list.length === 1 ? ' has' : 's have'} a problem` : 'No problems'),
+    ...(list.length ? list.map(({ account: a, items }) => h('div', { class: 'attn-item' },
+      h('span', { class: `dot ${items[0].level}`, title: items[0].level }),
+      h('div', {}, h('div', { class: 'who' }, a.name), ...items.map(i => h('div', { class: 'what' }, i.text))),
+      items.some(i => i.action === 'signin')
+        ? h('button', { class: 'btn small primary', type: 'button', 'data-account': `${a.provider || 'anthropic'}:${a.name}`, onclick: () => openSignin(a.provider || 'anthropic', a.name) }, 'Sign in')
+        : h('span'),
+    )) : [h('p', { class: 'ok' }, h('span', { class: 'dot good' }), 'Every account is signed in and usable.')]),
+  );
+  if (focusedAccount != null) {
+    const button = [...$('#bell-list').querySelectorAll('button')].find(b => b.dataset.account === focusedAccount);
+    (button || $('#bell summary')).focus({ preventScroll: true });
   }
+}
+
+function renderLeft(accounts, now, threshold) {
+  const groups = ['anthropic', 'codex'].map(provider => ({ provider, windows: remaining(accounts, provider, now) })).filter(g => g.windows.length);
+  $('#left-groups').replaceChildren(...(groups.length ? groups.map(({ provider, windows }) => h('div', { class: 'left-group', style: `--n:${windows.length}` },
+    h('h3', {}, `${providerName(provider)} subscriptions`),
+    h('div', { class: 'left-tiles' }, ...windows.map(w => {
+      const share = w.left / w.count;
+      const sev = severity(1 - share, threshold);
+      const title = w.accounts.map(a => `${a.name}: ${pct(a.left)} left${a.resetAt > now ? `, resets in ${formatDuration(a.resetAt - now)}` : ''}`).join('\n');
+      return h('div', { class: 'left-tile', title },
+        h('div', { class: 'line' }, h('span', { class: 'label' }, w.label), h('span', { class: 'muted' }, w.hint)),
+        h('div', { class: `value ${sev}` }, `${pct(share)} left`),
+        h('div', { class: 'track' }, h('div', { class: `fill ${sev}`, style: `width:${share * 100}%` })),
+        h('div', { class: 'sub' }, `${w.left.toFixed(1)} of ${w.count} account${w.count === 1 ? '' : 's'} unused`),
+        h('div', { class: 'sub' }, w.nextResetAt ? `next reset in ${formatDuration(w.nextResetAt - now)} (${w.nextResetAccount.replace(/@.*/, '')})` : 'nothing used yet'),
+      );
+    })),
+  )) : [h('p', { class: 'muted' }, 'No quota reported yet. Refresh quotas to ask the proxy.')]));
 }
 
 function renderTide(accounts, now, threshold) {
   const root = $('#tide-chart');
   const rows = accounts.filter(a => !a.disabled).map(a => ({ a, marks: meters(a).filter(m => m.resetAt && m.resetAt > now) })).filter(r => r.marks.length);
-  const W = 1000, left = 170, right = 40, rowH = 30, top = 28;
+  const W = Math.max(760, root.clientWidth || 1000), left = 190, right = 40, rowH = 40, top = 28;
   const H = top + Math.max(rows.length, 1) * rowH + 24;
   const span = 7 * 86400e3;
   const x = t => left + Math.min(1, Math.max(0, (t - now) / span)) * (W - left - right);
@@ -252,6 +285,7 @@ async function openSignin(provider, accountName) {
   const result = $('#signin-result'); result.textContent = ''; result.className = 'result';
   $('#signin-finish').disabled = false;
   $('#add-menu').open = false;
+  $('#bell').open = false;
   dlg.showModal();
   try {
     login = await api('/api/login/start', { provider });
@@ -292,7 +326,7 @@ $('#probe-btn').addEventListener('click', async () => {
   await control({ action: 'probe' });
   btn.disabled = false; btn.textContent = 'Refresh quotas';
 });
-document.addEventListener('click', e => { if (!$('#add-menu').contains(e.target)) $('#add-menu').open = false; });
+document.addEventListener('click', e => { for (const m of document.querySelectorAll('details.menu')) if (!m.contains(e.target)) m.open = false; });
 
 // ── theme ───────────────────────────────────────────────────────────────────
 const THEMES = ['system', 'light', 'dark'];
@@ -422,6 +456,143 @@ function renderLog(s) {
 }
 $('#log-range').addEventListener('change', () => last && renderLog(last));
 $('#log-who').addEventListener('change', () => last && renderLog(last));
+
+// ── API cost estimate ───────────────────────────────────────────────────────
+const usd = n => n.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
+const MODEL_NAMES = { 'claude-opus-5-5': 'Claude Opus 5.5', 'claude-fable-5-1': 'Claude Fable 5.1', codex: 'Codex (not priced)', unknown: 'Logged before pricing (not priced)' };
+const seg = id => $(`#${id} [aria-pressed="true"]`).dataset;
+for (const id of ['cost-range', 'cost-by']) {
+  $(`#${id}`).addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    $(`#${id}`).querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    if (last) renderCost(last);
+  });
+}
+
+function renderCost(s) {
+  const now = Date.now();
+  const range = seg('cost-range').range;
+  let r, binMs = 0;
+  if (range === 'all') {
+    // The proxy's own cumulative counters, priced as one delta from zero.
+    const all = tick({ accounts: (s.accounts || []).map(a => ({ name: a.name })) }, s, 0);
+    r = usageReport(all ? [all] : [], { since: 0 });
+  } else {
+    binMs = Number(range) > 86400e3 ? 6 * 3600e3 : 3600e3;
+    const since = now - Number(range);
+    r = usageReport(ticks, { since, until: now, binMs });
+  }
+  const t = r.total;
+
+  $('#cost-hero').textContent = usd(t.cost);
+  const unpricedPct = t.tokens ? t.unpriced / t.tokens : 0;
+  $('#cost-sub').textContent = [
+    `${compact(t.requests)} requests across ${Object.keys(r.accounts).length} accounts`,
+    unpricedPct ? `excludes ${unpricedPct < 0.001 ? 'under 0.1' : (unpricedPct * 100).toFixed(1)}% unpriced tokens` : null,
+    range === 'all' ? 'since the proxy started counting' : null,
+  ].filter(Boolean).join(' · ');
+
+  $('#cost-chart-title').textContent = range === 'all' ? 'Cost over time' : binMs === 3600e3 ? 'Hourly cost' : 'Cost per 6 hours';
+  if (range === 'all') $('#cost-chart').replaceChildren(h('p', { class: 'muted chart-note' }, 'The request log keeps 7 days, so the all-time figure has no history to plot. Pick Past 24 h or 7 days for the chart.'));
+  else renderCostChart(r.bins, binMs, now);
+
+  const tile = (label, value) => h('div', { class: 'kpi' }, h('div', { class: 'label' }, label), h('div', { class: 'value' }, value));
+  $('#cost-totals').replaceChildren(
+    tile('Processed tokens', compact(Math.round(t.tokens))),
+    tile('Cache reads', compact(Math.round(t.cacheRead))),
+    tile('Cache writes', compact(Math.round(t.cacheWrite))),
+    tile('Uncached input', compact(Math.round(t.input))),
+    tile('Output', compact(Math.round(t.output))),
+    tile('Cache savings', usd(t.savings)),
+  );
+
+  const by = seg('cost-by').by;
+  const entries = by === 'model'
+    ? Object.entries(r.models).map(([k, m]) => ({ name: MODEL_NAMES[k] || k, cost: m.priced ? m.cost : null, tokens: m.tokens }))
+    : Object.entries(r.accounts).map(([k, a]) => {
+      // older log rows don't record the provider, so the live account list wins
+      const provider = (s.accounts || []).find(x => x.name === k)?.provider || a.provider;
+      return { name: k, sub: providerName(provider), cost: provider === 'codex' || (a.tokens && a.unpriced >= a.tokens) ? null : a.cost, tokens: a.tokens, requests: a.requests };
+    });
+  entries.sort((a, b) => (b.cost ?? -1) - (a.cost ?? -1) || b.tokens - a.tokens);
+  const share = c => c == null ? '—' : t.cost ? `${(c / t.cost * 100).toFixed(1)}%` : '0%';
+  $('#cost-table').replaceChildren(h('div', { class: 'ledger' },
+    h('div', { class: 'crow head' }, h('div', {}, by === 'model' ? 'Model' : 'Account'), h('div', { class: 'num' }, 'Cost'), h('div', { class: 'num' }, 'Share'), h('div', { class: 'num' }, 'Tokens'), h('div', { class: 'num' }, by === 'model' ? '' : 'Requests')),
+    ...(entries.length ? entries.map(e => h('div', { class: 'crow' },
+      h('div', {}, h('div', { class: 'name' }, e.name), e.sub ? h('div', { class: 'hint' }, e.sub) : null),
+      h('div', { class: `num${e.cost == null ? ' muted' : ''}` }, e.cost == null ? 'Unpriced' : usd(e.cost)),
+      h('div', { class: 'num muted' }, share(e.cost)),
+      h('div', { class: 'num' }, compact(Math.round(e.tokens))),
+      h('div', { class: 'num muted' }, e.requests != null ? compact(e.requests) : ''),
+    )) : [h('div', { class: 'empty-note' }, 'No traffic in this range yet.')]),
+  ));
+}
+
+function renderCostChart(bins, binMs, now) {
+  const root = $('#cost-chart');
+  const W = Math.max(320, root.clientWidth || 640), H = 220, left = 52, right = 8, top = 10, bottom = 24;
+  const max = Math.max(...bins.map(b => b.cost));
+  // round the axis up to a 1/2/5 step so gridlines land on readable values
+  const step = (() => { const raw = (max || 1) / 4, p = 10 ** Math.floor(Math.log10(raw)); return [1, 2, 5, 10].map(m => m * p).find(v => v >= raw); })();
+  const yMax = step * 4;
+  const x = i => left + (bins.length > 1 ? i / (bins.length - 1) : 0.5) * (W - left - right);
+  const y = v => top + (1 - v / yMax) * (H - top - bottom);
+  const el = svg('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': `${$('#cost-chart-title').textContent}, peak ${usd(max)}` });
+  for (let v = 0; v <= yMax + 1e-9; v += step) {
+    el.append(svg('line', { class: 'grid', x1: left, x2: W - right, y1: y(v), y2: y(v) }));
+    el.append(svg('text', { x: left - 8, y: y(v) + 4, 'text-anchor': 'end' }, usd(v)));
+  }
+  const label = at => new Date(at).toLocaleString(undefined, binMs === 3600e3 ? { hour: 'numeric', minute: '2-digit' } : { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+  for (const i of [0, Math.floor((bins.length - 1) / 2), bins.length - 1]) {
+    el.append(svg('text', { x: x(i), y: H - 6, 'text-anchor': i === 0 ? 'start' : i === bins.length - 1 ? 'end' : 'middle' }, label(bins[i].at)));
+  }
+  const pts = bins.map((b, i) => `${x(i)},${y(b.cost)}`).join(' ');
+  el.append(svg('polygon', { class: 'area', points: `${x(0)},${y(0)} ${pts} ${x(bins.length - 1)},${y(0)}` }));
+  el.append(svg('polyline', { class: 'line', points: pts }));
+  const cross = svg('line', { class: 'cross', y1: top, y2: H - bottom, visibility: 'hidden' });
+  const dot = svg('circle', { class: 'dot', r: 4, visibility: 'hidden' });
+  const hit = svg('rect', { class: 'hit', x: left, y: top, width: W - left - right, height: H - top - bottom });
+  el.append(cross, dot, hit);
+
+  const tip = h('div', { class: 'tip', hidden: true });
+  const show = e => {
+    const box = el.getBoundingClientRect();
+    const px = (e.clientX - box.left) * (W / box.width);
+    const i = Math.max(0, Math.min(bins.length - 1, Math.round((px - left) / (W - left - right) * (bins.length - 1))));
+    const b = bins[i];
+    for (const [k, v] of [['x1', x(i)], ['x2', x(i)]]) cross.setAttribute(k, v);
+    dot.setAttribute('cx', x(i)); dot.setAttribute('cy', y(b.cost));
+    cross.setAttribute('visibility', 'visible'); dot.setAttribute('visibility', 'visible');
+    const end = Math.min(b.at + binMs, now);
+    const accts = Object.entries(b.accounts).sort((p, q) => q[1] - p[1]);
+    tip.replaceChildren(...[
+      h('div', { class: 'when' }, `${new Date(b.at).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })} – ${new Date(end).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`),
+      ...accts.slice(0, 6).map(([n, c]) => h('div', { class: 'kv' }, h('span', {}, n.replace(/@.*/, '')), h('span', {}, usd(c)))),
+      accts.length > 6 ? h('div', { class: 'kv muted' }, h('span', {}, `${accts.length - 6} more`), h('span', {}, '')) : null,
+      h('div', { class: 'kv total' }, h('span', {}, 'Total'), h('span', {}, usd(b.cost))),
+    ].filter(Boolean));
+    tip.hidden = false;
+    const fx = x(i) / W * box.width;
+    tip.style.left = `${fx > box.width / 2 ? fx - tip.offsetWidth - 12 : fx + 12}px`;
+    tip.style.top = `${top / H * box.height}px`;
+  };
+  hit.addEventListener('pointermove', show);
+  hit.addEventListener('pointerleave', () => { tip.hidden = true; cross.setAttribute('visibility', 'hidden'); dot.setAttribute('visibility', 'hidden'); });
+  root.replaceChildren(el, tip);
+}
+
+// ── pages ───────────────────────────────────────────────────────────────────
+function showPage() {
+  const page = ['overview', 'capacity', 'logs'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'overview';
+  document.querySelectorAll('[data-page]').forEach(el => { el.hidden = el.dataset.page !== page; });
+  document.querySelectorAll('[data-tab]').forEach(a => (a.dataset.tab === page ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current')));
+  if (last) render(last); // charts measure their container, which is 0 wide while hidden
+}
+window.addEventListener('hashchange', () => { showPage(); scrollTo(0, 0); });
+let resizeTimer, renderedWidth = innerWidth;
+// width only: mobile address bars fire resize on scroll, and re-rendering resets open selects
+window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (innerWidth !== renderedWidth && last) { renderedWidth = innerWidth; render(last); } }, 150); });
+showPage();
 
 await loadActivity();
 refresh();

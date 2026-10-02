@@ -1,4 +1,4 @@
-import { meters, severity, issues, sortForAttention, formatDuration, nextReset, remaining } from '/lib/attention.js';
+import { meters, severity, issues, sortForAttention, formatDuration, nextReset, remaining, resetCredits } from '/lib/attention.js';
 import { tick, totals, select } from '/lib/activity.js';
 import { usageReport } from '/lib/cost.js';
 
@@ -207,6 +207,7 @@ function renderRow(a, { now, threshold, cols, serving, adaptive }) {
     : [a.orgName, tier(auth)].filter(Boolean).join(', ');
 
   const u = a.usage || {};
+  const credits = a.provider === 'codex' ? resetCredits(a, now) : null;
   const tokens = (u.totalInputTokens || 0) + (u.totalOutputTokens || 0) + (u.totalCacheReadTokens || 0) + (u.totalCacheCreationTokens || 0);
 
   return h('div', { class: `lrow${a.disabled ? ' disabled' : ''}` },
@@ -220,11 +221,13 @@ function renderRow(a, { now, threshold, cols, serving, adaptive }) {
       h('div', {}, `last used ${ago(u.lastUsed, now)}`),
       a.sessions ? h('div', {}, `${a.sessions} active session${a.sessions === 1 ? '' : 's'}`) : null,
       adaptive?.weight != null ? h('div', {}, `routing share ${pct(adaptive.weight)}`) : null,
+      credits ? h('div', {}, h('strong', {}, credits.available), ` usage reset${credits.available === 1 ? '' : 's'} available`, credits.applicable === 0 ? h('span', { class: 'muted' }, ', nothing to reset yet') : null) : null,
     ),
     h('div', { class: 'actions' },
       h('button', { class: 'btn small', type: 'button', disabled: a.disabled || serving, onclick: () => control({ action: 'switch', account: a.name }) }, 'Use now'),
       h('button', { class: 'btn small', type: 'button', onclick: () => control({ action: 'disable', account: a.name, disabled: !a.disabled }) }, a.disabled ? 'Resume' : 'Pause'),
       h('button', { class: 'btn small', type: 'button', onclick: () => openSignin(a.provider || 'anthropic', a.name) }, 'Sign in again'),
+      credits ? h('button', { class: 'btn small', type: 'button', title: 'Spend one free reset credit to clear this account\'s used session and weekly windows now', onclick: e => redeemReset(a.name, e.currentTarget) }, 'Use a reset') : null,
     ),
   );
 }
@@ -253,6 +256,26 @@ function renderMeter(m, now, threshold, label) {
 async function control(body) {
   try { await api('/api/control', body); await refresh(); }
   catch (err) { const b = $('#banner'); b.hidden = false; b.textContent = `${body.action} failed: ${err.message}`; }
+}
+
+const RESET_RESULT = {
+  reset: 'usage windows cleared',
+  already_redeemed: 'already redeemed, usage windows cleared',
+  nothing_to_reset: 'nothing to reset yet, no credit spent',
+  no_credit: 'no credit left, nothing spent',
+};
+
+async function redeemReset(name, btn) {
+  if (!confirm(`Spend one free usage reset on ${name}? This clears its used windows now and cannot be undone.`)) return;
+  btn.disabled = true;
+  const b = $('#banner');
+  try {
+    const r = await api('/api/codex-reset', { account: name });
+    await refresh();
+    b.textContent = `Usage reset on ${name}: ${RESET_RESULT[r.code] || r.code || 'no answer'}.`;
+  } catch (err) { b.textContent = `Usage reset on ${name} failed: ${err.message}`; }
+  b.hidden = false;
+  btn.disabled = false;
 }
 
 // ── sign-in dialog ──────────────────────────────────────────────────────────

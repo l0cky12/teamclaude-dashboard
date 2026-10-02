@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { attention, meters, severity, nextReset, sortForAttention, formatDuration, remaining, issues } from '../lib/attention.js';
+import { attention, meters, severity, nextReset, sortForAttention, formatDuration, remaining, issues, resetCredits } from '../lib/attention.js';
 
 const now = 1_800_000_000_000;
 const base = { name: 'a@x', status: 'active', unavailable: null, quota: { unified7d: 0.72, unified7dReset: now + 3 * 86400e3, unified7dFable: 0.67, unified7dFableReset: now + 3 * 86400e3 }, auth: { hasRefreshToken: true } };
@@ -92,4 +92,13 @@ test('issues counts accounts with real problems, not near-limit ones', () => {
   assert.ok(out[0].items.every(i => i.kind === 'signin'));
   assert.equal(out[1].items[0].kind, 'blocked');
   assert.deepEqual(issues([{ ...base, name: 'near', quota: { unified7d: 0.95 } }], { now }), []);
+});
+
+test('resetCredits reports held credits and drops stale or empty readings', () => {
+  const at = rc => ({ quota: { resetCredits: rc } });
+  assert.deepEqual(resetCredits(at({ available: 2, applicable: 0, seenAt: now - 1000 }), now), { available: 2, applicable: 0 });
+  assert.deepEqual(resetCredits(at({ available: 1 }), now), { available: 1, applicable: null });
+  assert.equal(resetCredits(at({ available: 0, seenAt: now }), now), null);
+  assert.equal(resetCredits(at({ available: 3, seenAt: now - 8 * 86400e3 }), now), null);
+  assert.equal(resetCredits(base, now), null);
 });

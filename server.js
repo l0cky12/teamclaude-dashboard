@@ -5,10 +5,11 @@ import http from 'node:http';
 import { readFile, stat, appendFile, writeFile, mkdir } from 'node:fs/promises';
 import { join, extname, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
+import { randomBytes, randomUUID, createHash, timingSafeEqual } from 'node:crypto';
 import { loadConfig, atomicConfigUpdate, getConfigPath } from '@karpeleslab/teamclaude/src/config.js';
 import { parseAuthCode, profileForCredentials, tokenPairFromResponse } from '@karpeleslab/teamclaude/src/oauth.js';
 import { buildCodexAuthUrl, exchangeCodexCode } from '@karpeleslab/teamclaude/src/codex-auth.js';
+import { fetchResetCreditDetails, consumeResetCredit, redeemableCredit } from '@karpeleslab/teamclaude/src/codex-reset-credits.js';
 import { oauthIdentityFields, findUpsertTarget, updateAccountEntry, canUpsertOAuthAccount, sameIdentity } from '@karpeleslab/teamclaude/src/identity.js';
 import { tick } from './lib/activity.js';
 
@@ -257,6 +258,29 @@ async function upsertCodex(creds) {
   return outcome;
 }
 
+// ── Codex reset credits ─────────────────────────────────────────────────────
+
+// Spend one of a Codex account's free rate-limit reset credits now. The proxy
+// only redeems on its own when the weekly window is spent (autoRedeemResets),
+// so this calls Team Claude's own redeem functions with the token from config.
+// Irreversible; the page asks first. Upstream answers 200 even when it declines,
+// so the verdict is `code`: reset | already_redeemed | nothing_to_reset | no_credit.
+async function redeemReset(name) {
+  const c = (await loadConfig())?.accounts?.find(a => a.provider === 'codex' && a.name === name);
+  if (!c) throw Object.assign(new Error(`No Codex account named ${name}.`), { status: 404 });
+  if (c.expiresAt && c.expiresAt < Date.now()) throw Object.assign(new Error('The sign-in token is due for refresh. Refresh quotas, then try again.'), { status: 409 });
+  const account = { name, credential: c.accessToken, accountId: c.accountId };
+  const details = await fetchResetCreditDetails(account);
+  if (details.error) throw Object.assign(new Error(`Could not read the reset credits (${details.error}).`), { status: 502 });
+  const credit = redeemableCredit(details.credits);
+  if (!credit) throw Object.assign(new Error('This account holds no reset credit its plan can use.'), { status: 409 });
+  const r = await consumeResetCredit(account, { creditId: credit.id, redeemRequestId: randomUUID() });
+  if (r.error) throw Object.assign(new Error(`The redeem request failed (${r.error}). It may still have gone through; refresh quotas before trying again.`), { status: 502 });
+  await proxy('POST', '/teamclaude/probe').catch(() => null); // re-read quotas and the credit count
+  latestAt = 0;
+  return { ok: true, code: r.code, redeemed: r.code === 'reset' || r.code === 'already_redeemed', windowsReset: r.windowsReset };
+}
+
 // ── control plane passthrough ───────────────────────────────────────────────
 
 const CONTROL = {
@@ -330,6 +354,7 @@ async function handle(req, res) {
       latestAt = 0;
       return send(res, r.status, r.json);
     }
+    if (req.method === 'POST' && pathname === '/api/codex-reset') return send(res, 200, await redeemReset(String((await readBody(req)).account || '')));
     if (req.method === 'POST' && pathname === '/api/users') return send(res, 200, await userAction(await readBody(req)));
     if (req.method === 'POST' && pathname === '/api/login/start') {
       const { provider } = await readBody(req);

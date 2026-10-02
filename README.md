@@ -7,6 +7,7 @@ multi-account proxy. It shows, for every pooled Claude and Codex account:
 - a timeline of when each quota window resets, so you can see the order capacity comes back;
 - per-window meters (5-hour session, weekly, per-model) with reset countdowns and staleness;
 - request and token usage, active sessions, and the proxy's routing share;
+- Codex free usage-reset credits held per account, with a button to spend one (asks first; it cannot be undone);
 - sign-in for Claude and Codex accounts from the browser, no terminal needed;
 - users: give each person their own proxy key and see their requests and tokens (all time, last 24 h, last 5 h);
 - a request log: what finished in each polling interval, by user and by account, with no prompt contents stored;

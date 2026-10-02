@@ -103,14 +103,14 @@ function renderBell(accounts, opts) {
     $('#bell-live').textContent = label;
   }
   // Keep keyboard focus while refreshing the alerts, including resolved accounts.
-  const focusedAccount = $('#bell').contains(document.activeElement) ? document.activeElement.dataset.account : null;
+  const focusedAccount = $('#bell').contains(document.activeElement) ? document.activeElement.dataset.account : null; // provider:name, as one email can be both
   $('#bell-list').replaceChildren(
     h('h2', {}, list.length ? `${list.length} account${list.length === 1 ? ' has' : 's have'} a problem` : 'No problems'),
     ...(list.length ? list.map(({ account: a, items }) => h('div', { class: 'attn-item' },
       h('span', { class: `dot ${items[0].level}`, title: items[0].level }),
       h('div', {}, h('div', { class: 'who' }, a.name), ...items.map(i => h('div', { class: 'what' }, i.text))),
       items.some(i => i.action === 'signin')
-        ? h('button', { class: 'btn small primary', type: 'button', 'data-account': a.name, onclick: () => openSignin(a.provider || 'anthropic', a.name) }, 'Sign in')
+        ? h('button', { class: 'btn small primary', type: 'button', 'data-account': `${a.provider || 'anthropic'}:${a.name}`, onclick: () => openSignin(a.provider || 'anthropic', a.name) }, 'Sign in')
         : h('span'),
     )) : [h('p', { class: 'ok' }, h('span', { class: 'dot good' }), 'Every account is signed in and usable.')]),
   );
@@ -542,7 +542,7 @@ function renderCostChart(bins, binMs, now) {
     el.append(svg('line', { class: 'grid', x1: left, x2: W - right, y1: y(v), y2: y(v) }));
     el.append(svg('text', { x: left - 8, y: y(v) + 4, 'text-anchor': 'end' }, usd(v)));
   }
-  const label = at => new Date(at).toLocaleString(undefined, binMs === 3600e3 ? { hour: 'numeric' } : { weekday: 'short', hour: 'numeric' });
+  const label = at => new Date(at).toLocaleString(undefined, binMs === 3600e3 ? { hour: 'numeric', minute: '2-digit' } : { weekday: 'short', hour: 'numeric', minute: '2-digit' });
   for (const i of [0, Math.floor((bins.length - 1) / 2), bins.length - 1]) {
     el.append(svg('text', { x: x(i), y: H - 6, 'text-anchor': i === 0 ? 'start' : i === bins.length - 1 ? 'end' : 'middle' }, label(bins[i].at)));
   }
@@ -566,7 +566,7 @@ function renderCostChart(bins, binMs, now) {
     const end = Math.min(b.at + binMs, now);
     const accts = Object.entries(b.accounts).sort((p, q) => q[1] - p[1]);
     tip.replaceChildren(...[
-      h('div', { class: 'when' }, `${new Date(b.at).toLocaleString(undefined, { weekday: 'short', hour: 'numeric' })} – ${new Date(end).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`),
+      h('div', { class: 'when' }, `${new Date(b.at).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })} – ${new Date(end).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`),
       ...accts.slice(0, 6).map(([n, c]) => h('div', { class: 'kv' }, h('span', {}, n.replace(/@.*/, '')), h('span', {}, usd(c)))),
       accts.length > 6 ? h('div', { class: 'kv muted' }, h('span', {}, `${accts.length - 6} more`), h('span', {}, '')) : null,
       h('div', { class: 'kv total' }, h('span', {}, 'Total'), h('span', {}, usd(b.cost))),

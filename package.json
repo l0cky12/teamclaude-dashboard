@@ -1,0 +1,16 @@
+{
+  "name": "teamclaude-dashboard",
+  "version": "0.1.0",
+  "description": "Web dashboard for the Team Claude multi-account proxy: quota meters, reset timeline, account health, and browser sign-in for Claude and Codex.",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": { "node": ">=22" },
+  "dependencies": {
+    "@karpeleslab/teamclaude": "^1.1.22"
+  },
+  "license": "MIT"
+}

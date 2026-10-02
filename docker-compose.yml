@@ -1,0 +1,21 @@
+# Team Claude dashboard beside a proxy running on this host.
+# The proxy binds 127.0.0.1:3456 by default, so the dashboard shares the
+# host network. The config file is written by the dashboard on sign-in and
+# user changes (Team Claude's own atomic rename + lock), so its DIRECTORY is
+# mounted, not the file alone. The request log lives in the data directory.
+services:
+  dashboard:
+    build: .
+    image: teamclaude-dashboard
+    network_mode: host
+    user: "${UID:-1000}:${GID:-1000}"
+    environment:
+      PORT: "${PORT:-8787}"
+      TEAMCLAUDE_URL: "${TEAMCLAUDE_URL:-http://127.0.0.1:3456}"
+      TEAMCLAUDE_CONFIG: /config/teamclaude.json
+      DASHBOARD_DATA_DIR: /data
+      DASHBOARD_PASSWORD: "${DASHBOARD_PASSWORD:-}"
+    volumes:
+      - ${TEAMCLAUDE_CONFIG_DIR:-~/.config}:/config
+      - ${DASHBOARD_DATA_DIR:-./data}:/data
+    restart: unless-stopped

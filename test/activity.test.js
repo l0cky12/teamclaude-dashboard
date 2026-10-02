@@ -45,3 +45,15 @@ test('totals and select', () => {
   assert.deepEqual(select(ticks, { who: 'liam' }).map(t => t.at), [1, 2]);
   assert.deepEqual(select(ticks, { who: 'b@x' }).map(t => t.at), [2]);
 });
+
+test('names matching object prototype properties are kept and matched exactly', () => {
+  const names = ['constructor', 'toString', '__proto__'];
+  const snapAll = n => ({ accounts: names.map(name => ({ name, usage: { totalRequests: n } })), clients: Object.fromEntries(names.map(name => [name, { requests: n }])) });
+  const t = tick(snapAll(0), snapAll(1), 1);
+  assert.deepEqual(Object.keys(t.accounts), names);
+  assert.deepEqual(Object.keys(t.clients), names);
+  assert.deepEqual(Object.keys(totals([t], 'accounts')), names);
+  assert.equal(totals([t], 'clients').__proto__.requests, 1);
+  assert.equal(Object.hasOwn(Object, 'requests'), false);
+  assert.equal(select([{ at: 1, accounts: { 'a@x': {} }, clients: {} }], { who: 'toString' }).length, 0);
+});

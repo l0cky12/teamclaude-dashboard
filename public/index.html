@@ -17,6 +17,11 @@
     <h1>Team Claude</h1>
     <p id="proxy-line" class="muted">Connecting to the proxy…</p>
   </div>
+  <nav class="tabs" aria-label="Pages">
+    <a href="#overview" data-tab="overview">Overview</a>
+    <a href="#capacity" data-tab="capacity">Capacity</a>
+    <a href="#logs" data-tab="logs">Logs &amp; users</a>
+  </nav>
   <div class="top-actions">
     <button type="button" class="btn" id="theme-btn" title="Switch between system, light and dark">Theme: system</button>
     <details class="menu" id="add-menu">
@@ -27,65 +32,120 @@
       </div>
     </details>
     <button type="button" class="btn" id="probe-btn" title="Ask the proxy to re-read every account's quota now">Refresh quotas</button>
+    <details class="menu" id="bell">
+      <summary class="btn bell-btn" aria-label="Account alerts">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 3a6 6 0 0 0-6 6v3.6L4.3 15.4A1 1 0 0 0 5.2 17h13.6a1 1 0 0 0 .9-1.6L18 12.6V9a6 6 0 0 0-6-6Zm-2.2 15.5a2.3 2.3 0 0 0 4.4 0Z" fill="currentColor"/></svg>
+        <span class="bell-count" id="bell-count" hidden></span>
+      </summary>
+      <div class="menu-list bell-list" id="bell-list"></div>
+    </details>
+    <span class="sr-only" id="bell-live" aria-live="polite"></span>
   </div>
 </header>
 
 <div id="banner" class="banner" hidden></div>
 
 <main>
-  <section id="attention" class="attention" aria-live="polite"></section>
-
-  <section class="tide">
-    <div class="section-head">
-      <h2>When capacity comes back</h2>
-      <p class="muted">Each mark is the moment a window resets. Filled marks are weekly windows, hollow marks are 5-hour sessions.</p>
+  <div data-page="overview">
+    <div class="top-row">
+      <section class="left">
+        <div class="section-head">
+          <h2>Subscription usage left</h2>
+          <p class="muted">Unused quota pooled across active accounts. 100% means every account's window is untouched.</p>
+        </div>
+        <div id="left-groups"></div>
+      </section>
+      <section class="cost">
+        <div class="section-head">
+          <h2>API cost estimate</h2>
+          <div class="seg" id="cost-range" role="group" aria-label="Time range">
+            <button type="button" data-range="86400000" aria-pressed="true">Past 24 h</button>
+            <button type="button" data-range="604800000" aria-pressed="false">7 days</button>
+            <button type="button" data-range="all" aria-pressed="false">All time</button>
+          </div>
+        </div>
+        <div class="cost-top">
+          <div>
+            <div class="hero" id="cost-hero">—</div>
+            <p class="muted" id="cost-sub"></p>
+          </div>
+          <div>
+            <h3 id="cost-chart-title">Hourly cost</h3>
+            <div id="cost-chart"></div>
+          </div>
+        </div>
+        <div class="kpis" id="cost-totals"></div>
+      </section>
     </div>
-    <div id="tide-chart"></div>
-  </section>
 
-  <section id="ledger"></section>
+    <section id="ledger"></section>
 
-  <section class="users">
-    <div class="section-head">
-      <h2>Users</h2>
-      <p class="muted">Each user gets their own proxy key, so requests and tokens are booked to them. Team Claude attributes usage per user but does not limit it.</p>
-    </div>
-    <div id="users-table"></div>
-    <form id="user-add" class="row">
-      <input id="user-name" name="name" placeholder="Name, for example liam" required pattern="[\w.@+\-]{1,64}" autocomplete="off">
-      <button type="submit" class="btn">Add user</button>
-    </form>
-    <div id="user-key" class="keybox" hidden>
-      <p id="user-key-text"></p>
-      <div class="row">
-        <code id="user-key-value"></code>
-        <button type="button" class="btn small" id="user-key-copy">Copy key</button>
+    <section class="cost-breakdown">
+      <div class="section-head">
+        <h2>API cost breakdown</h2>
+        <div class="seg" id="cost-by" role="group" aria-label="Break down by">
+          <button type="button" data-by="account" aria-pressed="true">Account</button>
+          <button type="button" data-by="model" aria-pressed="false">Model</button>
+        </div>
       </div>
-      <p class="muted">Shown once. The user's tools send it as the proxy's <code>x-api-key</code> header, the same way the shared key is sent today.</p>
-    </div>
-  </section>
+      <p class="muted">What the proxy's traffic would cost at Anthropic API list prices. The proxy counts tokens per account and quota bucket, not per model, so Fable bucket traffic is priced as Fable 5.1 and the rest as Opus 5.5. Codex tokens are counted but not priced.</p>
+      <div id="cost-table"></div>
+    </section>
+  </div>
 
-  <section class="log">
-    <div class="section-head">
-      <h2>Request log</h2>
-      <div class="row">
-        <label class="muted">Last
-          <select id="log-range">
-            <option value="3600000">hour</option>
-            <option value="21600000">6 hours</option>
-            <option value="86400000" selected>24 hours</option>
-            <option value="604800000">7 days</option>
-          </select>
-        </label>
-        <label class="muted">Show
-          <select id="log-who"><option value="">everything</option></select>
-        </label>
+  <div data-page="capacity" hidden>
+    <section class="tide">
+      <div class="section-head">
+        <h2>When capacity comes back</h2>
+        <p class="muted">Each mark is the moment a window resets. Filled marks are weekly windows, hollow marks are 5-hour sessions.</p>
       </div>
-    </div>
-    <p class="muted" id="log-note"></p>
-    <div id="log-summary" class="tiles"></div>
-    <div id="log-table"></div>
-  </section>
+      <div id="tide-chart"></div>
+    </section>
+  </div>
+
+  <div data-page="logs" hidden>
+    <section class="log">
+      <div class="section-head">
+        <h2>Request log</h2>
+        <div class="row">
+          <label class="muted">Last
+            <select id="log-range">
+              <option value="3600000">hour</option>
+              <option value="21600000">6 hours</option>
+              <option value="86400000" selected>24 hours</option>
+              <option value="604800000">7 days</option>
+            </select>
+          </label>
+          <label class="muted">Show
+            <select id="log-who"><option value="">everything</option></select>
+          </label>
+        </div>
+      </div>
+      <p class="muted" id="log-note"></p>
+      <div id="log-summary" class="tiles"></div>
+      <div id="log-table"></div>
+    </section>
+
+    <section class="users">
+      <div class="section-head">
+        <h2>Users</h2>
+        <p class="muted">Each user gets their own proxy key, so requests and tokens are booked to them. Team Claude attributes usage per user but does not limit it.</p>
+      </div>
+      <div id="users-table"></div>
+      <form id="user-add" class="row">
+        <input id="user-name" name="name" placeholder="Name, for example liam" required pattern="[\w.@+\-]{1,64}" autocomplete="off">
+        <button type="submit" class="btn">Add user</button>
+      </form>
+      <div id="user-key" class="keybox" hidden>
+        <p id="user-key-text"></p>
+        <div class="row">
+          <code id="user-key-value"></code>
+          <button type="button" class="btn small" id="user-key-copy">Copy key</button>
+        </div>
+        <p class="muted">Shown once. The user's tools send it as the proxy's <code>x-api-key</code> header, the same way the shared key is sent today.</p>
+      </div>
+    </section>
+  </div>
 </main>
 
 <footer class="muted" id="foot"></footer>

@@ -131,6 +131,15 @@ a { color: var(--sea-ink); }
 #tide-chart .mark.hollow.warning { stroke: var(--warning); fill: var(--paper); }
 #tide-chart .tag { fill: var(--ink-2); }
 #tide-chart .empty { fill: var(--ink-3); }
+#capacity-note { margin: 6px 0 12px; font-size: 13px; }
+#capacity-range { flex-wrap: wrap; max-width: 100%; }
+#capacity-range button { white-space: nowrap; }
+#tide-chart .reset-point { cursor: pointer; }
+#tide-chart .reset-hit { fill: transparent; stroke: transparent; }
+#tide-chart .reset-point:is(:hover, :focus) .reset-hit { stroke: var(--sea); stroke-width: 2; }
+#tide-chart .tag { pointer-events: none; }
+.capacity-tip { position: fixed; z-index: 10; max-width: calc(100vw - 16px); overflow-wrap: anywhere; }
+.capacity-tip .tip-name { font-weight: 600; margin-bottom: 6px; }
 
 /* ledger */
 .group { margin-bottom: 32px; }

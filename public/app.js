@@ -1,6 +1,7 @@
-import { meters, severity, issues, sortForAttention, formatDuration, nextReset, remaining } from '/lib/attention.js';
+import { meters, severity, issues, sortForAttention, formatDuration, remaining } from '/lib/attention.js';
 import { tick, totals, select } from '/lib/activity.js';
 import { usageReport } from '/lib/cost.js';
+import { observeResets, resetWindow, resetRows } from '/lib/capacity.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const h = (tag, attrs = {}, ...children) => {
@@ -34,6 +35,27 @@ const providerName = p => p === 'codex' ? 'Codex' : 'Claude';
 
 let last = null;
 let lastGoodAt = 0;
+let resetEvents = [], capacityError = null;
+
+const capacityTip = h('div', { class: 'tip capacity-tip', id: 'capacity-tip', role: 'tooltip', hidden: true });
+let capacityTipTarget = null;
+document.body.append(capacityTip);
+function showCapacityTip(target, name, windows) {
+  capacityTipTarget = target;
+  capacityTip.replaceChildren(h('div', { class: 'tip-name' }, name), ...windows.map(w =>
+    h('div', { class: 'kv' }, h('span', {}, w.label), h('strong', {}, pct(w.utilization)))));
+  capacityTip.hidden = false;
+  positionCapacityTip();
+}
+function positionCapacityTip() {
+  if (capacityTip.hidden || !capacityTipTarget?.isConnected) return;
+  const box = capacityTipTarget.getBoundingClientRect();
+  capacityTip.style.left = `${Math.max(8, Math.min(innerWidth - capacityTip.offsetWidth - 8, box.left + box.width / 2 - capacityTip.offsetWidth / 2))}px`;
+  capacityTip.style.top = `${Math.max(8, box.top > capacityTip.offsetHeight + 16 ? box.top - capacityTip.offsetHeight - 8 : Math.min(innerHeight - capacityTip.offsetHeight - 8, box.bottom + 8))}px`;
+}
+const hideCapacityTip = () => { capacityTip.hidden = true; };
+window.addEventListener('scroll', positionCapacityTip, true);
+window.addEventListener('keydown', e => { if (e.key === 'Escape') hideCapacityTip(); });
 
 async function api(path, body) {
   const res = await fetch(path, body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : undefined);
@@ -46,6 +68,8 @@ async function refresh() {
   try {
     last = await api('/api/status');
     lastGoodAt = Date.now();
+    try { resetEvents = (await api('/api/capacity')).events || []; capacityError = null; }
+    catch (err) { capacityError = err.message; }
     $('#banner').hidden = true;
     render(last);
   } catch (err) {
@@ -141,54 +165,82 @@ function renderLeft(accounts, now, threshold) {
 
 function renderTide(accounts, now, threshold) {
   const root = $('#tide-chart');
-  const rows = accounts.filter(a => !a.disabled).map(a => ({ a, marks: meters(a).filter(m => m.resetAt && m.resetAt > now) })).filter(r => r.marks.length);
+  const focused = root.contains(document.activeElement) ? document.activeElement.dataset.reset : null;
+  hideCapacityTip();
+  const range = seg('capacity-range').range;
+  const upcoming = range === 'upcoming';
+  // Use current quotas for the default view, recorded observations for past ranges.
+  const live = new Map();
+  observeResets(live, accounts, now);
+  const events = upcoming ? [...live.values()] : resetEvents;
+  const window = resetWindow(range, events, now);
+  const { since, until, binMs } = window;
+  const rows = resetRows(events, window);
+  $('#tide-title').textContent = upcoming ? 'When capacity comes back' : 'Capacity reset history';
+  $('#capacity-note').textContent = capacityError ? `Cannot load reset history: ${capacityError}.` : upcoming ? ''
+    : 'Past marks show the last usage observed before each reset. Only resets observed by this dashboard are available.';
   const W = Math.max(760, root.clientWidth || 1000), left = 190, right = 40, rowH = 40, top = 28;
   const H = top + Math.max(rows.length, 1) * rowH + 24;
-  const span = 7 * 86400e3;
-  const x = t => left + Math.min(1, Math.max(0, (t - now) / span)) * (W - left - right);
-  const el = svg('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Timeline of quota resets' });
+  const x = t => left + (t - since) / (until - since) * (W - left - right);
+  const el = svg('svg', { viewBox: `0 0 ${W} ${H}`, role: 'group', 'aria-label': upcoming ? 'Timeline of upcoming quota resets' : 'Timeline of past quota resets' });
 
-  // day ticks at local midnights
-  const d0 = new Date(now); d0.setHours(24, 0, 0, 0);
-  for (let t = d0.getTime(); t < now + span; t += 86400e3) {
+  // Local midnight ticks for day ranges; four-hour ticks for the past day.
+  const d0 = new Date(since);
+  if (binMs < 86400e3) d0.setHours(d0.getHours() + 1, 0, 0, 0);
+  else d0.setHours(24, 0, 0, 0);
+  for (let t = d0.getTime(); t < until; t += binMs) {
     el.append(svg('line', { class: 'axis', x1: x(t), x2: x(t), y1: top - 6, y2: H - 20 }));
-    el.append(svg('text', { x: x(t), y: H - 6, 'text-anchor': 'middle' }, new Date(t).toLocaleDateString(undefined, { weekday: 'short' })));
+    const options = binMs < 86400e3 ? { hour: 'numeric', minute: '2-digit' } : until - since <= 7 * 86400e3 ? { weekday: 'short' } : { month: 'short', day: 'numeric' };
+    el.append(svg('text', { x: x(t), y: H - 6, 'text-anchor': 'middle' }, new Date(t).toLocaleString(undefined, options)));
   }
-  el.append(svg('line', { class: 'now', x1: left, x2: left, y1: top - 10, y2: H - 20 }));
-  el.append(svg('text', { class: 'now-label', x: left + 6, y: top - 12 }, 'now'));
-  el.append(svg('text', { x: W - right, y: top - 12, 'text-anchor': 'end' }, '+7 days'));
+  const nowX = upcoming ? left : W - right;
+  el.append(svg('line', { class: 'now', x1: nowX, x2: nowX, y1: top - 10, y2: H - 20 }));
+  el.append(svg('text', { class: 'now-label', x: upcoming ? left + 6 : nowX, y: top - 12, 'text-anchor': upcoming ? 'start' : 'end' }, 'now'));
+  el.append(svg('text', { x: upcoming ? W - right : left, y: top - 12, 'text-anchor': upcoming ? 'end' : 'start' }, upcoming ? '+7 days' : new Date(since).toLocaleString(undefined, { month: 'short', day: 'numeric', ...(binMs < 86400e3 ? { hour: 'numeric', minute: '2-digit' } : {}) })));
 
-  if (!rows.length) el.append(svg('text', { class: 'empty', x: left + 12, y: top + rowH / 2 + 4 }, 'No reset times reported yet. Refresh quotas to ask the proxy.'));
+  if (!rows.length) el.append(svg('text', { class: 'empty', x: left + 12, y: top + rowH / 2 + 4 }, upcoming ? 'No reset times reported yet. Refresh quotas to ask the proxy.' : 'No recorded resets in this range yet.'));
 
-  rows.sort((p, q) => nextReset(p.a, now) - nextReset(q.a, now));
-  rows.forEach(({ a, marks }, i) => {
+  rows.forEach(({ name: fullName, provider, marks }, i) => {
     const y = top + i * rowH + rowH / 2;
-    const name = a.name.length > 22 ? `${a.name.slice(0, 21)}…` : a.name;
-    el.append(svg('text', { class: 'name', x: left - 12, y: y + 4, 'text-anchor': 'end' }, name));
+    const name = fullName.length > 22 ? `${fullName.slice(0, 21)}…` : fullName;
+    el.append(svg('text', { class: 'name', x: left - 12, y: y + 4, 'text-anchor': 'end' }, name, svg('title', {}, `${providerName(provider)} · ${fullName}`)));
     el.append(svg('line', { class: 'lane', x1: left, x2: W - right, y1: y, y2: y }));
-    const weekly = marks.filter(m => m.key !== 'unified5h');
-    const sessions = marks.filter(m => m.key === 'unified5h');
-    for (const m of [...sessions, ...weekly]) {
-      const sev = severity(m.utilization, threshold);
-      const hollow = m.key === 'unified5h';
-      const cls = `mark${hollow ? ' hollow' : ''}${sev !== 'ok' ? ` ${sev}` : ''}`;
-      const title = `${a.name} — ${m.label} ${pct(m.utilization)}, resets ${when(m.resetAt, now)} (in ${formatDuration(m.resetAt - now)})`;
-      const mark = a.provider === 'codex'
-        ? svg('rect', { class: cls, x: x(m.resetAt) - 5, y: y - 5, width: 10, height: 10 })
-        : svg('circle', { class: cls, cx: x(m.resetAt), cy: y, r: hollow ? 4.5 : 5.5 });
-      mark.append(svg('title', {}, title));
-      el.append(mark);
+    // One target per timestamp: overlapping windows all appear in its tooltip.
+    const groups = new Map();
+    for (const m of marks) {
+      if (!groups.has(m.resetAt)) groups.set(m.resetAt, []);
+      groups.get(m.resetAt).push(m);
     }
-    // direct label for the window that matters most: the fullest weekly one
-    const lead = weekly.sort((p, q) => q.utilization - p.utilization)[0] || sessions[0];
-    if (lead) {
-      const lx = x(lead.resetAt);
-      const text = `${lead.label} ${pct(lead.utilization)}, ${when(lead.resetAt, now)}`;
-      const anchorEnd = lx > W - right - 190;
-      el.append(svg('text', { class: 'tag', x: anchorEnd ? lx - 12 : lx + 12, y: y + 4, 'text-anchor': anchorEnd ? 'end' : 'start' }, text));
+    for (const [at, windows] of groups) {
+      const id = JSON.stringify([provider, fullName, at]);
+      const title = `${fullName} — ${windows.map(m => `${m.label} ${pct(m.utilization)}`).join(', ')}`;
+      const group = svg('g', { class: 'reset-point', tabindex: 0, role: 'img', 'aria-label': title, 'aria-describedby': 'capacity-tip', 'data-reset': id });
+      for (const m of windows.slice().sort((a, b) => (a.key !== 'unified5h') - (b.key !== 'unified5h') || a.utilization - b.utilization)) {
+        const sev = severity(m.utilization, threshold);
+        const hollow = m.key === 'unified5h';
+        const cls = `mark${hollow ? ' hollow' : ''}${sev !== 'ok' ? ` ${sev}` : ''}`;
+        group.append(provider === 'codex'
+          ? svg('rect', { class: cls, x: x(at) - 5, y: y - 5, width: 10, height: 10 })
+          : svg('circle', { class: cls, cx: x(at), cy: y, r: hollow ? 4.5 : 5.5 }));
+      }
+      group.append(svg('circle', { class: 'reset-hit', cx: x(at), cy: y, r: 12 }));
+      group.addEventListener('pointerenter', () => showCapacityTip(group, fullName, windows));
+      group.addEventListener('pointerleave', hideCapacityTip);
+      group.addEventListener('focus', () => showCapacityTip(group, fullName, windows));
+      group.addEventListener('blur', hideCapacityTip);
+      group.addEventListener('click', () => { group.focus({ preventScroll: true }); showCapacityTip(group, fullName, windows); });
+      el.append(group);
+    }
+    // Keep the default direct label concise; history may contain many resets.
+    if (upcoming) {
+      const weekly = marks.filter(m => m.key !== 'unified5h');
+      const lead = weekly.sort((p, q) => q.utilization - p.utilization)[0] || marks[0];
+      const lx = x(lead.resetAt), anchorEnd = lx > W - right - 120;
+      el.append(svg('text', { class: 'tag', x: anchorEnd ? lx - 16 : lx + 16, y: y + 4, 'text-anchor': anchorEnd ? 'end' : 'start' }, `${lead.label} ${pct(lead.utilization)}`));
     }
   });
   root.replaceChildren(el);
+  if (focused != null) [...root.querySelectorAll('[data-reset]')].find(e => e.dataset.reset === focused)?.focus({ preventScroll: true });
 }
 
 function renderRow(a, { now, threshold, cols, serving, adaptive }) {
@@ -461,11 +513,14 @@ $('#log-who').addEventListener('change', () => last && renderLog(last));
 const usd = n => n.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
 const MODEL_NAMES = { 'claude-opus-5-5': 'Claude Opus 5.5', 'claude-fable-5-1': 'Claude Fable 5.1', codex: 'Codex (not priced)', unknown: 'Logged before pricing (not priced)' };
 const seg = id => $(`#${id} [aria-pressed="true"]`).dataset;
-for (const id of ['cost-range', 'cost-by']) {
+for (const id of ['cost-range', 'cost-by', 'capacity-range']) {
   $(`#${id}`).addEventListener('click', e => {
     const b = e.target.closest('button'); if (!b) return;
     $(`#${id}`).querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
-    if (last) renderCost(last);
+    if (last) {
+      if (id === 'capacity-range') renderTide(last.accounts || [], Date.now(), last.switchThreshold ?? 0.98);
+      else renderCost(last);
+    }
   });
 }
 

@@ -5,6 +5,7 @@ multi-account proxy. It shows, for every pooled Claude and Codex account:
 
 - which accounts need a human (errors, rejected credentials, expired sign-ins, near-limit windows), listed first with a one-click fix;
 - a timeline of when each quota window resets, so you can see the order capacity comes back;
+- Capacity ranges for upcoming resets, past 24 hours, past 7 days, past 30 days, and all recorded resets;
 - per-window meters (5-hour session, weekly, per-model) with reset countdowns and staleness;
 - request and token usage, active sessions, and the proxy's routing share;
 - sign-in for Claude and Codex accounts from the browser, no terminal needed;
@@ -92,6 +93,14 @@ user. One row is one interval with activity. Rows are kept for 7 days in
 content is recorded. If you need full request bodies for debugging, Team
 Claude's own `logDir` setting writes one file per request; see its
 configuration docs.
+
+The Capacity tab keeps its default seven-day upcoming-reset view. Past ranges
+show reported reset times saved in `capacity.jsonl` in the data directory,
+with the last utilization observed before each reset. Hover, tap, or focus a
+mark to see the account and each window's percentage used. Capacity history
+is kept across restarts without the request log's seven-day cutoff; All time
+shows all recorded past resets. History starts when this version first observes
+quotas, so it cannot reconstruct resets from before then.
 
 ## Security notes
 

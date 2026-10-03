@@ -96,9 +96,17 @@
   <div data-page="capacity" hidden>
     <section class="tide">
       <div class="section-head">
-        <h2>When capacity comes back</h2>
-        <p class="muted">Each mark is the moment a window resets. Filled marks are weekly windows, hollow marks are 5-hour sessions.</p>
+        <h2 id="tide-title">When capacity comes back</h2>
+        <div class="seg" id="capacity-range" role="group" aria-label="Capacity time range">
+          <button type="button" data-range="upcoming" aria-pressed="true">Upcoming resets</button>
+          <button type="button" data-range="86400000" aria-pressed="false">Past 24 hours</button>
+          <button type="button" data-range="604800000" aria-pressed="false">Past 7 days</button>
+          <button type="button" data-range="2592000000" aria-pressed="false">Past 30 days</button>
+          <button type="button" data-range="all" aria-pressed="false">All time</button>
+        </div>
       </div>
+      <p class="muted">Each mark is a reported reset time. Filled marks are weekly windows, hollow marks are 5-hour sessions. Hover or focus a mark for its usage.</p>
+      <p class="muted" id="capacity-note" aria-live="polite"></p>
       <div id="tide-chart"></div>
     </section>
   </div>

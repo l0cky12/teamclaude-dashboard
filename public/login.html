@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Sign in to Team Claude</title>
+<script src="/theme.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body class="login">
+<div class="login-bar"><i class="logo-mark"></i>Team Claude</div>
+<main class="login-main">
+
+  <form class="login-col" id="s-first" hidden>
+    <a class="back" href="#" id="first-back" hidden>‹ All accounts</a>
+    <h1 id="first-title">Sign in</h1>
+    <p class="muted sub" id="first-sub">No accounts are saved on this device yet.</p>
+    <div class="f"><label for="first-name">Name</label><input id="first-name" name="username" type="text" autocomplete="username" required></div>
+    <div class="f"><label for="first-pass">Password</label><input id="first-pass" name="password" type="password" autocomplete="current-password" required></div>
+    <div class="f" id="first-setup-wrap" hidden>
+      <label for="first-setup">Setup password</label><input id="first-setup" type="password" autocomplete="off">
+      <p class="muted hint">The DASHBOARD_PASSWORD from the server's .env file.</p>
+    </div>
+    <p class="form-err" id="first-err" hidden aria-live="polite"></p>
+    <button class="btn primary go" type="submit" id="first-go">Sign in</button>
+    <label class="keep"><input type="checkbox" id="first-remember" checked> Remember this account on this device</label>
+    <p class="help muted" id="first-help">Forgot your password? Ask an admin to reset it.</p>
+  </form>
+
+  <section class="login-col" id="s-choose" hidden>
+    <h1>Choose an account</h1>
+    <p class="muted sub">Saved on this device.</p>
+    <div class="acc-list" id="choose-list"></div>
+    <p class="help muted"><a href="#" id="choose-remove">Remove an account from this device</a></p>
+  </section>
+
+  <form class="login-col" id="s-password" hidden>
+    <a class="back" href="#">‹ All accounts</a>
+    <h1>Enter your password</h1>
+    <div class="acct"><span class="av" id="pw-av"></span><div><b id="pw-name"></b><span class="muted" id="pw-role"></span></div><a href="#">Change</a></div>
+    <input type="text" name="username" autocomplete="username" id="pw-user" class="sr-only" tabindex="-1" aria-hidden="true">
+    <div class="f"><label for="pw-pass">Password</label><input id="pw-pass" name="password" type="password" autocomplete="current-password" required></div>
+    <p class="form-err" id="pw-err" hidden aria-live="polite"></p>
+    <button class="btn primary go" type="submit">Sign in</button>
+    <label class="keep"><input type="checkbox" id="pw-keep" checked> Keep me signed in on this device</label>
+    <p class="help muted">Forgot your password? Ask an admin to reset it.</p>
+  </form>
+
+</main>
+<script type="module" src="/login.js"></script>
+</body>
+</html>

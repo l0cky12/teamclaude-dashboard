@@ -10,7 +10,9 @@ multi-account proxy. It shows, for every pooled Claude and Codex account:
 - sign-in for Claude and Codex accounts from the browser, no terminal needed;
 - users: give each person their own proxy key and see their requests and tokens (all time, last 24 h, last 5 h);
 - a request log: what finished in each polling interval, by user and by account, with no prompt contents stored;
-- light, dark, or system theme.
+- light, dark, or system theme;
+- sign-in with your own dashboard account and role (admin, operator, viewer);
+  a device remembers several accounts, so switching is one click.
 
 ![Dashboard in light mode](docs/screenshot-light.png)
 
@@ -25,7 +27,7 @@ The proxy listens on `127.0.0.1:3456` by default, so the container shares the
 host network. The config file's directory is mounted so sign-ins can be saved.
 
 ```sh
-cp .env.example .env     # set DASHBOARD_PASSWORD if the port is reachable by others
+cp .env.example .env     # set DASHBOARD_PASSWORD: it guards creating the first admin
 docker compose up -d --build
 ```
 
@@ -36,7 +38,7 @@ goes to the data directory, which the compose file also mounts.
 | Variable | Default | Meaning |
 |---|---|---|
 | `PORT` | `8787` | Port the dashboard listens on |
-| `DASHBOARD_PASSWORD` | empty | HTTP Basic auth password (any username). Strongly recommended. |
+| `DASHBOARD_PASSWORD` | empty | Setup password: needed to create the first admin sign-in, and still accepted as Basic auth by scripts. Strongly recommended. |
 | `TEAMCLAUDE_URL` | `http://127.0.0.1:3456` | Where the proxy listens |
 | `TEAMCLAUDE_CONFIG_DIR` | `~/.config` | Directory containing `teamclaude.json` |
 | `TEAMCLAUDE_API_KEY` | from config | Override the proxy key if the config is not mounted |
@@ -52,8 +54,9 @@ the config the proxy reads, so remote setups can view but not add accounts.
 The dashboard binds every interface on the host, so with Tailscale on the
 machine it is reachable from any device on your tailnet at
 `http://<tailscale-ip>:<PORT>` or `http://<machine-name>:<PORT>` with MagicDNS.
-The browser asks for the password once (any username). Keep
-`DASHBOARD_PASSWORD` set whenever the port is reachable beyond localhost.
+Everyone signs in with their own dashboard account (see below). Keep
+`DASHBOARD_PASSWORD` set whenever the port is reachable beyond localhost, so
+nobody else can claim the first admin account.
 
 ## Run without Docker
 
@@ -92,6 +95,18 @@ user. One row is one interval with activity. Rows are kept for 7 days in
 content is recorded. If you need full request bodies for debugging, Team
 Claude's own `logDir` setting writes one file per request; see its
 configuration docs.
+
+## Dashboard sign-ins
+
+On a fresh dashboard, `/login` offers to create the first admin account; if
+`DASHBOARD_PASSWORD` is set it is required as the setup password. Admins add
+more sign-ins under Logs & users, each with a role: admins manage everything,
+operators can act on accounts and proxy users, viewers can only look. Accounts
+are stored hashed in `users.json` in the data directory, next to a random
+`secret` that signs session cookies, so sessions survive restarts. A device
+remembers the accounts that signed in on it and offers them on the next visit;
+the avatar menu in the header switches between them or signs out. Dashboard
+sign-ins are separate from proxy users, which are keys for tools.
 
 ## Security notes
 

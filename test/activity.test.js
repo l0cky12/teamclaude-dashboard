@@ -19,6 +19,14 @@ test('tick keeps the per-bucket cache split and marks Codex accounts', () => {
   assert.equal(t.accounts['c@x'].provider, 'codex');
 });
 
+test('tick takes per-model deltas when the proxy reports them, else the Codex models seen', () => {
+  const at = (n, byModel) => ({ accounts: [{ name: 'c@x', provider: 'codex', quota: { codexModelLimits: { 'gpt-6-luna': 'premium' } }, usage: { totalRequests: n, totalInputTokens: n, byModel } }] });
+  const t = tick(at(1, { 'gpt-6-luna': { inputTokens: 1 } }), at(4, { 'gpt-6-luna': { inputTokens: 3 }, __proto__x: { inputTokens: 0 }, 'gpt-6-astra': { inputTokens: 1, outputTokens: 2 } }), 1);
+  assert.deepEqual(t.accounts['c@x'].models, { 'gpt-6-luna': { input: 2, output: 0, cacheRead: 0, cacheWrite: 0 }, 'gpt-6-astra': { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 } });
+  assert.equal(t.accounts['c@x'].seen, undefined);
+  assert.deepEqual(tick(at(1), at(2), 1).accounts['c@x'].seen, ['gpt-6-luna']);
+});
+
 test('tick is null when nothing changed or on first poll', () => {
   assert.equal(tick(null, snap(1, 1)), null);
   assert.equal(tick(snap(1, 1), snap(1, 1)), null);

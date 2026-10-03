@@ -12,6 +12,7 @@ import { buildCodexAuthUrl, exchangeCodexCode } from '@karpeleslab/teamclaude/sr
 import { oauthIdentityFields, findUpsertTarget, updateAccountEntry, canUpsertOAuthAccount, sameIdentity } from '@karpeleslab/teamclaude/src/identity.js';
 import { tick } from './lib/activity.js';
 import { hashPassword, verifyPassword, signToken, verifyToken, allowed, throttle, ROLES, NAME } from './lib/auth.js';
+import { resetsBetween } from './lib/attention.js';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const PORT = Number(process.env.PORT) || 8787;
@@ -74,7 +75,7 @@ async function fetchStatus() {
 // ── request log (poller) ────────────────────────────────────────────────────
 
 const ACTIVITY_FILE = join(DATA_DIR, 'activity.jsonl');
-let latest = null, latestAt = 0, pollError = null;
+let latest = null, latestAt = 0, latestReadAt = 0, pollError = null, polling = null;
 /** @type {ReturnType<typeof tick>[]} */
 let ticks = [];
 
@@ -87,11 +88,24 @@ async function loadTicks() {
   } catch (err) { if (err.code !== 'ENOENT') console.error(`[dashboard] could not read ${ACTIVITY_FILE}: ${err.message}`); }
 }
 
-async function poll() {
+// One poll at a time: two overlapping polls would both diff against the same
+// snapshot and log the same requests twice.
+const poll = () => (polling ??= pollOnce().finally(() => { polling = null; }));
+
+async function pollOnce() {
   try {
-    const next = await fetchStatus();
+    const readAt = Date.now();
+    let next = await fetchStatus();
+    // A window reset since the last read. The proxy drops the old figure but
+    // only learns the new one from that account's next request, so ask it to
+    // read every account's usage now (zero-spend) and show that instead.
+    if (latest && resetsBetween(latest.accounts, latestReadAt, readAt)) {
+      const probe = await proxy('POST', '/teamclaude/probe').catch(err => ({ status: 0, json: { error: err.message } }));
+      if (probe.status === 200) next = await fetchStatus();
+      else console.error(`[dashboard] quota probe after a reset failed: ${probe.json?.error || `proxy answered ${probe.status}`}`);
+    }
     const t = tick(latest, next);
-    latest = next; latestAt = Date.now(); pollError = null;
+    latest = next; latestAt = Date.now(); latestReadAt = readAt; pollError = null;
     if (t) {
       ticks.push(t);
       // ponytail: the file only grows between restarts; loadTicks() compacts it on start.

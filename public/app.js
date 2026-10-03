@@ -1,4 +1,4 @@
-import { meters, severity, issues, sortForAttention, formatDuration, nextReset, remaining } from '/lib/attention.js';
+import { meters, severity, issues, sortForAttention, formatDuration, nextReset, remaining, resetsBetween } from '/lib/attention.js';
 import { tick, totals, select } from '/lib/activity.js';
 import { usageReport } from '/lib/cost.js';
 
@@ -667,6 +667,12 @@ window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer
 showPage();
 
 await loadSession();
-await loadActivity();
-refresh();
-setInterval(async () => { await loadActivity(); refresh(); }, 10_000);
+// Every 10 s, or every 2 s while a quota window resets within a minute either
+// side, so the new figure shows as soon as the server has it.
+let activityAt = 0;
+(async function loop() {
+  if (Date.now() - activityAt >= 9_000) { activityAt = Date.now(); await loadActivity(); }
+  await refresh();
+  const now = Date.now();
+  setTimeout(loop, last && resetsBetween(last.accounts, now - 60e3, now + 60e3) ? 2_000 : 10_000);
+})();

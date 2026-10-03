@@ -107,12 +107,15 @@ are stored hashed in `users.json` in the data directory, next to a random
 remembers the accounts that signed in on it and offers them on the next visit;
 the avatar menu in the header switches between them or signs out. Dashboard
 sign-ins are separate from proxy users, which are keys for tools.
+Remembering an account saves only its name and role. Choose "Keep me signed
+in on this device" separately to keep the session for 30 days.
 
 ## Security notes
 
-- Anyone who can reach the dashboard can switch, pause and re-sign accounts, and
-  the dashboard holds the proxy's API key. Set `DASHBOARD_PASSWORD` and keep the
-  port on a trusted network.
+- Admins and operators can switch, pause and re-sign proxy accounts; viewers
+  are read-only. The dashboard holds the proxy's API key. Set
+  `DASHBOARD_PASSWORD` to protect first-admin setup and keep the port on a
+  trusted network.
 - State-changing requests are refused when a browser sends a foreign `Origin`.
 - Static files are served with a strict Content Security Policy; the only
   external resource is the IBM Plex Sans font from Google Fonts, which falls back

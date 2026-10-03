@@ -53,8 +53,11 @@ $('#s-first').addEventListener('submit', async e => {
   e.preventDefault();
   const name = $('#first-name').value.trim(), password = $('#first-pass').value, rem = $('#first-remember').checked;
   try {
-    if (session.setup) await api('POST', '/api/accounts', { action: 'setup', name, password, setupPassword: $('#first-setup').value });
-    const r = await api('POST', '/api/session', { name, password, remember: rem });
+    if (session.setup) {
+      await api('POST', '/api/accounts', { action: 'setup', name, password, setupPassword: $('#first-setup').value });
+      session.setup = false;
+    }
+    const r = await api('POST', '/api/session', { name, password, remember: $('#first-keep').checked });
     if (rem) remember(r.user);
     location.replace('/');
   } catch (err) { showError($('#first-err'), $('#first-pass'), err.message); }

@@ -181,7 +181,7 @@ function renderBell(accounts, opts) {
     ...(list.length ? list.map(({ account: a, items }) => h('div', { class: 'attn-item' },
       h('span', { class: `dot ${items[0].level}`, title: items[0].level }),
       h('div', {}, h('div', { class: 'who' }, a.name), ...items.map(i => h('div', { class: 'what' }, i.text))),
-      items.some(i => i.action === 'signin')
+      me?.role !== 'viewer' && items.some(i => i.action === 'signin')
         ? h('button', { class: 'btn small primary', type: 'button', 'data-account': `${a.provider || 'anthropic'}:${a.name}`, onclick: () => openSignin(a.provider || 'anthropic', a.name) }, 'Sign in')
         : h('span'),
     )) : [h('p', { class: 'ok' }, h('span', { class: 'dot good' }), 'Every account is signed in and usable.')]),

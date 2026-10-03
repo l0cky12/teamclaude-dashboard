@@ -284,15 +284,24 @@ async function loadUsers() {
   try { secret = (await readFile(SECRET_FILE, 'utf8')).trim(); } catch (err) { if (err.code !== 'ENOENT') throw err; }
   if (!secret) { secret = randomBytes(32).toString('base64url'); await writeFile(SECRET_FILE, secret, { mode: 0o600 }); }
 }
-async function saveUsers() {
-  await writeFile(USERS_FILE + '.tmp', JSON.stringify({ users }, null, 2) + '\n', { mode: 0o600 });
-  await rename(USERS_FILE + '.tmp', USERS_FILE);
+let usersWrite = Promise.resolve();
+function updateUsers(change) {
+  const operation = usersWrite.then(async () => {
+    const next = users.map(u => ({ ...u }));
+    const result = change(next);
+    await writeFile(USERS_FILE + '.tmp', JSON.stringify({ users: next }, null, 2) + '\n', { mode: 0o600 });
+    await rename(USERS_FILE + '.tmp', USERS_FILE);
+    users = next;
+    return result;
+  });
+  usersWrite = operation.catch(() => {}); // a failed save must not block later attempts
+  return operation;
 }
 const publicUser = u => ({ name: u.name, role: u.role, createdAt: u.createdAt ?? null, lastSignInAt: u.lastSignInAt ?? null });
 
 function cookie(req, name) {
   const c = (req.headers.cookie || '').split(/;\s*/).find(x => x.startsWith(name + '='));
-  return c ? decodeURIComponent(c.slice(name.length + 1)) : '';
+  try { return c ? decodeURIComponent(c.slice(name.length + 1)) : ''; } catch { return ''; }
 }
 function sessionCookie(req, value, maxAge) {
   const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
@@ -310,15 +319,17 @@ function requester(req) {
 
 async function signIn(req, res, body) {
   const name = String(body.name || '').trim();
-  const wait = throttle(failures, name);
-  if (wait) throw fail(429, `Too many attempts. Try again in ${wait} minute${wait === 1 ? '' : 's'}.`);
-  const user = users.find(u => u.name === name);
-  if (!user || !verifyPassword(user, body.password)) {
-    failures.get(name).push(Date.now());
-    throw fail(401, "That name or password isn't right. Check them and try again.");
-  }
-  user.lastSignInAt = Date.now();
-  await saveUsers();
+  const user = await updateUsers(next => {
+    const wait = throttle(failures, name);
+    if (wait) throw fail(429, `Too many attempts. Try again in ${wait} minute${wait === 1 ? '' : 's'}.`);
+    const user = next.find(u => u.name === name);
+    if (!user || !verifyPassword(user, body.password)) {
+      failures.get(name).push(Date.now());
+      throw fail(401, "That name or password isn't right. Check them and try again.");
+    }
+    user.lastSignInAt = Date.now();
+    return user;
+  });
   const remember = !!body.remember;
   const ttl = remember ? SESSION_MS.remember : SESSION_MS.once;
   res.setHeader('set-cookie', sessionCookie(req, signToken(secret, user, Date.now() + ttl), remember ? ttl / 1000 : null));
@@ -326,33 +337,37 @@ async function signIn(req, res, body) {
 }
 
 /** Admin-only, except `setup`, which creates the first admin while there are no accounts. */
-async function accountAction(body) {
-  const { action } = body;
-  const name = String(body.name || '').trim();
-  const password = String(body.password || '');
-  if (!NAME.test(name)) throw fail(400, 'Name may use letters, digits, . _ @ + - (max 64).');
-  if (['setup', 'add', 'reset'].includes(action) && password.length < 8) throw fail(400, 'Password needs at least 8 characters.');
-  const idx = users.findIndex(u => u.name === name);
-  if (action === 'setup') {
-    if (users.length) throw fail(409, 'This dashboard already has accounts. Sign in as an admin to add more.');
-    if (PASSWORD && !safeEqual(body.setupPassword || '', PASSWORD)) throw fail(403, "The setup password isn't right.");
-    users.push({ name, role: 'admin', ...hashPassword(password), createdAt: Date.now() });
-  } else if (action === 'add') {
-    if (idx >= 0) throw fail(409, `There is already an account named ${name}.`);
-    if (!ROLES.includes(body.role)) throw fail(400, `Role must be one of ${ROLES.join(', ')}.`);
-    users.push({ name, role: body.role, ...hashPassword(password), createdAt: Date.now() });
-  } else if (action === 'reset') {
-    if (idx < 0) throw fail(404, `No account named ${name}.`);
-    users[idx] = { ...users[idx], ...hashPassword(password) }; // new hash also signs them out everywhere
-  } else if (action === 'remove') {
-    if (idx < 0) throw fail(404, `No account named ${name}.`);
-    if (users[idx].role === 'admin' && users.filter(u => u.role === 'admin').length === 1) throw fail(400, 'Keep at least one admin.');
-    users.splice(idx, 1);
-  } else {
-    throw fail(400, `unknown action "${action}"`);
-  }
-  await saveUsers();
-  return { ok: true, users: users.map(publicUser) };
+async function accountAction(req, body) {
+  return updateUsers(users => {
+    const { action } = body;
+    // Recheck after receiving the body and waiting for earlier saves. Only setup
+    // may run without an admin, and it still validates the setup password below.
+    if (action !== 'setup' && requester(req)?.role !== 'admin') throw fail(403, 'An admin sign-in is required.');
+    const name = String(body.name || '').trim();
+    const password = String(body.password || '');
+    if (!NAME.test(name)) throw fail(400, 'Name may use letters, digits, . _ @ + - (max 64).');
+    if (['setup', 'add', 'reset'].includes(action) && password.length < 8) throw fail(400, 'Password needs at least 8 characters.');
+    const idx = users.findIndex(u => u.name === name);
+    if (action === 'setup') {
+      if (users.length) throw fail(409, 'This dashboard already has accounts. Sign in as an admin to add more.');
+      if (PASSWORD && !safeEqual(body.setupPassword || '', PASSWORD)) throw fail(403, "The setup password isn't right.");
+      users.push({ name, role: 'admin', ...hashPassword(password), createdAt: Date.now() });
+    } else if (action === 'add') {
+      if (idx >= 0) throw fail(409, `There is already an account named ${name}.`);
+      if (!ROLES.includes(body.role)) throw fail(400, `Role must be one of ${ROLES.join(', ')}.`);
+      users.push({ name, role: body.role, ...hashPassword(password), createdAt: Date.now() });
+    } else if (action === 'reset') {
+      if (idx < 0) throw fail(404, `No account named ${name}.`);
+      users[idx] = { ...users[idx], ...hashPassword(password) }; // new hash also signs them out everywhere
+    } else if (action === 'remove') {
+      if (idx < 0) throw fail(404, `No account named ${name}.`);
+      if (users[idx].role === 'admin' && users.filter(u => u.role === 'admin').length === 1) throw fail(400, 'Keep at least one admin.');
+      users.splice(idx, 1);
+    } else {
+      throw fail(400, `unknown action "${action}"`);
+    }
+    return { ok: true, users: users.map(publicUser) };
+  });
 }
 
 // Reachable without signing in: the sign-in page and what it needs.
@@ -368,6 +383,14 @@ function readBody(req, limit = 64 * 1024) {
     req.on('end', () => { try { resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}); } catch { reject(Object.assign(new Error('invalid JSON body'), { status: 400 })); } });
     req.on('error', reject);
   });
+}
+
+async function readAuthorizedBody(req, pathname) {
+  const body = await readBody(req);
+  const me = requester(req);
+  if (!me) throw fail(401, 'sign in required');
+  if (!allowed(me, req.method, pathname)) throw fail(403, 'Your role can only view the dashboard.');
+  return body;
 }
 
 function send(res, code, body, headers = {}) {
@@ -392,19 +415,19 @@ async function serveStatic(res, pathname) {
 }
 
 async function handle(req, res) {
-  const url = new URL(req.url, 'http://x');
-  const { pathname } = url;
-  // Same-origin only for anything that changes state: browsers always set
-  // Origin on cross-site POSTs; curl sends none and stays allowed.
-  if (req.method !== 'GET' && req.method !== 'HEAD' && req.headers.origin && new URL(req.headers.origin).host !== req.headers.host) return send(res, 403, { error: 'cross-origin request refused' });
-  const me = requester(req);
-  if (!me && !isOpen(pathname)) {
-    if (req.method === 'GET' && !pathname.startsWith('/api/') && !extname(pathname)) { res.writeHead(302, { location: '/login' }); return res.end(); }
-    return send(res, 401, { error: 'sign in required' });
-  }
-  if (me && pathname.startsWith('/api/') && pathname !== '/api/session' && !allowed(me, req.method, pathname)) return send(res, 403, { error: `Your role (${me.role}) can only view the dashboard.` });
-
   try {
+    const url = new URL(req.url, 'http://x');
+    const { pathname } = url;
+    // Same-origin only for anything that changes state: browsers always set
+    // Origin on cross-site POSTs; curl sends none and stays allowed.
+    if (req.method !== 'GET' && req.method !== 'HEAD' && req.headers.origin && new URL(req.headers.origin).host !== req.headers.host) return send(res, 403, { error: 'cross-origin request refused' });
+    const me = requester(req);
+    if (!me && !isOpen(pathname)) {
+      if (req.method === 'GET' && !pathname.startsWith('/api/') && !extname(pathname)) { res.writeHead(302, { location: '/login' }); return res.end(); }
+      return send(res, 401, { error: 'sign in required' });
+    }
+    if (me && pathname.startsWith('/api/') && pathname !== '/api/session' && !allowed(me, req.method, pathname)) return send(res, 403, { error: `Your role (${me.role}) can only view the dashboard.` });
+
     if (pathname === '/api/session') {
       if (req.method === 'GET') return send(res, 200, { user: me ? publicUser(me) : null, setup: !users.length, setupPassword: !!PASSWORD });
       if (req.method === 'POST') return send(res, 200, await signIn(req, res, await readBody(req)));
@@ -412,7 +435,7 @@ async function handle(req, res) {
     }
     if (pathname === '/api/accounts') {
       if (req.method === 'GET') return send(res, 200, { users: users.map(publicUser) });
-      if (req.method === 'POST') return send(res, 200, await accountAction(await readBody(req)));
+      if (req.method === 'POST') return send(res, 200, await accountAction(req, await readBody(req)));
     }
     if (req.method === 'GET' && pathname === '/api/status') return send(res, 200, await status());
     if (req.method === 'GET' && pathname === '/api/activity') {
@@ -420,7 +443,7 @@ async function handle(req, res) {
       return send(res, 200, { ticks: ticks.filter(t => t.at >= since), pollMs: POLL_MS, retainMs: RETAIN_MS });
     }
     if (req.method === 'POST' && pathname === '/api/control') {
-      const body = await readBody(req);
+      const body = await readAuthorizedBody(req, pathname);
       const make = CONTROL[body.action];
       if (!make) return send(res, 400, { error: `unknown action "${body.action}"` });
       const [path, payload] = make(body);
@@ -428,14 +451,14 @@ async function handle(req, res) {
       latestAt = 0;
       return send(res, r.status, r.json);
     }
-    if (req.method === 'POST' && pathname === '/api/users') return send(res, 200, await userAction(await readBody(req)));
+    if (req.method === 'POST' && pathname === '/api/users') return send(res, 200, await userAction(await readAuthorizedBody(req, pathname)));
     if (req.method === 'POST' && pathname === '/api/login/start') {
-      const { provider } = await readBody(req);
+      const { provider } = await readAuthorizedBody(req, pathname);
       if (!['anthropic', 'codex'].includes(provider)) return send(res, 400, { error: 'provider must be "anthropic" or "codex"' });
       return send(res, 200, startLogin(provider));
     }
     if (req.method === 'POST' && pathname === '/api/login/finish') {
-      const { id, input } = await readBody(req);
+      const { id, input } = await readAuthorizedBody(req, pathname);
       return send(res, 200, { ok: true, ...(await finishLogin(String(id || ''), input)) });
     }
     if (pathname.startsWith('/api/')) return send(res, 404, { error: 'not found' });
@@ -444,7 +467,7 @@ async function handle(req, res) {
   } catch (err) {
     const code = err.status || (err.name === 'TimeoutError' || err.cause?.code ? 502 : 500);
     const message = err.cause?.code === 'ECONNREFUSED' ? `cannot reach the proxy at ${PROXY_URL}` : err.message;
-    if (code >= 500) console.error(`[dashboard] ${req.method} ${pathname}: ${message}`);
+    if (code >= 500) console.error(`[dashboard] ${req.method} ${req.url}: ${message}`);
     return send(res, code, { ok: false, error: message });
   }
 }

@@ -75,4 +75,6 @@ test('Codex without a per-model split is a range over the models it served', () 
   assert.equal(r.total.savings, 0.1 - 0.01);
   assert.deepEqual(r.models.codex.candidates, ['gpt-6-luna', 'gpt-6-astra', 'gpt-future']);
   assert.deepEqual({ ...r.bins[0].accounts }, { 'c@x': { cost: 0.11, costHigh: 11 } });
+  const { seen: _, ...old } = d;
+  assert.equal(usageReport([{ at: 1, accounts: { 'c@x': old } }], { seen: { 'c@x': ['gpt-6-luna'] } }).total.cost, 0.11);
 });

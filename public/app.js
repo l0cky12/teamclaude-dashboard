@@ -555,7 +555,8 @@ function renderCost(s) {
   } else {
     binMs = Number(range) > 86400e3 ? 6 * 3600e3 : 3600e3;
     const since = now - Number(range);
-    r = usageReport(ticks, { since, until: now, binMs });
+    const seen = Object.fromEntries((s.accounts || []).filter(a => a.provider === 'codex').map(a => [a.name, Object.keys(a.quota?.codexModelLimits || {})]));
+    r = usageReport(ticks, { since, until: now, binMs, seen });
   }
   const t = r.total;
 

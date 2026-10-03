@@ -385,7 +385,7 @@ async function accountAction(req, body) {
 }
 
 // Reachable without signing in: the sign-in page and what it needs.
-const OPEN = new Set(['/login', '/login.js', '/style.css', '/theme.js', '/api/session']);
+const OPEN = new Set(['/login', '/login.js', '/style.css', '/theme.js', '/favicon.svg', '/api/session']);
 const isOpen = pathname => OPEN.has(pathname) || pathname.startsWith('/lib/') || (pathname === '/api/accounts' && !users.length);
 
 // ── http ────────────────────────────────────────────────────────────────────

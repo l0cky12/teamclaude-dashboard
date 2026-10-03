@@ -11,6 +11,7 @@ import { parseAuthCode, profileForCredentials, tokenPairFromResponse } from '@ka
 import { buildCodexAuthUrl, exchangeCodexCode } from '@karpeleslab/teamclaude/src/codex-auth.js';
 import { oauthIdentityFields, findUpsertTarget, updateAccountEntry, canUpsertOAuthAccount, sameIdentity } from '@karpeleslab/teamclaude/src/identity.js';
 import { tick } from './lib/activity.js';
+import { observeResets, resetId } from './lib/capacity.js';
 import { hashPassword, verifyPassword, signToken, verifyToken, allowed, throttle, ROLES, NAME } from './lib/auth.js';
 import { resetsBetween } from './lib/attention.js';
 
@@ -75,6 +76,10 @@ async function fetchStatus() {
 // ── request log (poller) ────────────────────────────────────────────────────
 
 const ACTIVITY_FILE = join(DATA_DIR, 'activity.jsonl');
+const CAPACITY_FILE = join(DATA_DIR, 'capacity.jsonl');
+const resetHistory = new Map();
+const pendingResets = new Map();
+let resetWrite = Promise.resolve();
 let latest = null, latestAt = 0, latestReadAt = 0, pollError = null, polling = null;
 /** @type {ReturnType<typeof tick>[]} */
 let ticks = [];
@@ -86,6 +91,32 @@ async function loadTicks() {
     ticks = (await readFile(ACTIVITY_FILE, 'utf8')).split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(t => t && t.at >= cutoff);
     await writeFile(ACTIVITY_FILE, ticks.map(t => JSON.stringify(t)).join('\n') + (ticks.length ? '\n' : ''));
   } catch (err) { if (err.code !== 'ENOENT') console.error(`[dashboard] could not read ${ACTIVITY_FILE}: ${err.message}`); }
+}
+
+async function loadResets() {
+  try {
+    for (const line of (await readFile(CAPACITY_FILE, 'utf8')).split('\n').filter(Boolean)) {
+      let e; try { e = JSON.parse(line); } catch { continue; }
+      if (e && typeof e.name === 'string' && typeof e.key === 'string' && Number.isFinite(e.resetAt) && Number.isFinite(e.utilization)) resetHistory.set(resetId(e), e);
+    }
+    // Compact repeated observations, retaining every distinct reported reset.
+    await writeFile(CAPACITY_FILE + '.tmp', [...resetHistory.values()].map(e => JSON.stringify(e) + '\n').join(''));
+    await rename(CAPACITY_FILE + '.tmp', CAPACITY_FILE);
+  } catch (err) { if (err.code !== 'ENOENT') console.error(`[dashboard] could not read ${CAPACITY_FILE}: ${err.message}`); }
+}
+
+async function saveResets(changed) {
+  for (const e of changed) pendingResets.set(resetId(e), e);
+  // Serialize appends; keep failed writes queued for the next successful poll.
+  resetWrite = resetWrite.then(async () => {
+    const batch = [...pendingResets.values()];
+    if (!batch.length) return;
+    try {
+      await appendFile(CAPACITY_FILE, batch.map(e => JSON.stringify(e) + '\n').join(''));
+      for (const e of batch) if (pendingResets.get(resetId(e)) === e) pendingResets.delete(resetId(e));
+    } catch (err) { console.error(`[dashboard] could not write ${CAPACITY_FILE}: ${err.message}`); }
+  });
+  await resetWrite;
 }
 
 // One poll at a time: two overlapping polls would both diff against the same
@@ -106,6 +137,8 @@ async function pollOnce() {
     }
     const t = tick(latest, next);
     latest = next; latestAt = Date.now(); latestReadAt = readAt; pollError = null;
+    const resets = observeResets(resetHistory, next.accounts, latestAt);
+    await saveResets(resets);
     if (t) {
       ticks.push(t);
       // ponytail: the file only grows between restarts; loadTicks() compacts it on start.
@@ -452,6 +485,7 @@ async function handle(req, res) {
       if (req.method === 'POST') return send(res, 200, await accountAction(req, await readBody(req)));
     }
     if (req.method === 'GET' && pathname === '/api/status') return send(res, 200, await status());
+    if (req.method === 'GET' && pathname === '/api/capacity') return send(res, 200, { events: [...resetHistory.values()] });
     if (req.method === 'GET' && pathname === '/api/activity') {
       const since = Number(url.searchParams.get('since')) || 0;
       return send(res, 200, { ticks: ticks.filter(t => t.at >= since), pollMs: POLL_MS, retainMs: RETAIN_MS });
@@ -487,6 +521,7 @@ async function handle(req, res) {
 }
 
 await loadTicks();
+await loadResets();
 await loadUsers();
 poll();
 setInterval(poll, POLL_MS).unref();

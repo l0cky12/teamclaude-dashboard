@@ -83,6 +83,7 @@ test('first-admin setup cannot be bypassed with another account action or delaye
 test('malformed cookies do not terminate the server', async t => {
   const d = await dashboard(t);
   assert.equal((await d.request('/api/status', null, 'tc_session=%')).status, 401);
+  assert.equal((await d.request('/api/capacity')).status, 401);
   assert.equal((await d.request('/api/session')).status, 200);
 });
 
@@ -120,6 +121,7 @@ test('roles, password resets, removals and session expiry options are enforced',
     const signed = await d.request('/api/session', { name: role, password: 'role-password', remember: true });
     assert.match(signed.cookie, /Max-Age=2592000/);
     assert.equal((await d.request('/api/status', null, signed.cookie)).status, 200);
+    assert.equal((await d.request('/api/capacity', null, signed.cookie)).status, 200);
     assert.equal((await d.request('/api/accounts', null, signed.cookie)).status, 403);
     assert.equal((await d.request('/api/control', { action: 'probe' }, signed.cookie)).status, role === 'viewer' ? 403 : 200);
     assert.equal((await d.request('/api/accounts', { action: 'reset', name: role, password: 'new-password' }, cookie)).status, 200);

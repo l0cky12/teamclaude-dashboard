@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
 <title>Team Claude</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <script src="/theme.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -32,6 +33,10 @@
       </div>
     </details>
     <button type="button" class="btn" id="probe-btn" title="Ask the proxy to re-read every account's quota now">Refresh quotas</button>
+    <details class="menu" id="me" hidden>
+      <summary class="btn me-btn"><span class="av av-sm" id="me-av" aria-hidden="true"></span><span id="me-name"></span></summary>
+      <div class="menu-list me-list" id="me-list"></div>
+    </details>
     <details class="menu" id="bell">
       <summary class="btn bell-btn" aria-label="Account alerts">
         <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 3a6 6 0 0 0-6 6v3.6L4.3 15.4A1 1 0 0 0 5.2 17h13.6a1 1 0 0 0 .9-1.6L18 12.6V9a6 6 0 0 0-6-6Zm-2.2 15.5a2.3 2.3 0 0 0 4.4 0Z" fill="currentColor"/></svg>
@@ -152,6 +157,21 @@
         </div>
         <p class="muted">Shown once. The user's tools send it as the proxy's <code>x-api-key</code> header, the same way the shared key is sent today.</p>
       </div>
+    </section>
+
+    <section class="signins">
+      <div class="section-head">
+        <h2>Dashboard sign-ins</h2>
+        <p class="muted">Who can open this dashboard. Admins manage everything, operators can act on accounts and users, viewers can only look.</p>
+      </div>
+      <div id="signins-table"></div>
+      <form id="signin-add" class="row" hidden>
+        <input id="signin-name" placeholder="Name, for example liam" required pattern="[\w.@+\-]{1,64}" autocomplete="off">
+        <select id="signin-role" aria-label="Role"><option value="viewer">Viewer</option><option value="operator">Operator</option><option value="admin">Admin</option></select>
+        <input id="signin-pass" type="password" placeholder="Temporary password, 8+ characters" required minlength="8" autocomplete="new-password">
+        <button type="submit" class="btn">Add sign-in</button>
+      </form>
+      <p id="signin-note" class="result" aria-live="polite"></p>
     </section>
   </div>
 </main>

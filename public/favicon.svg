@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+<!-- A quota gauge split into segments: several accounts pooled into one meter. Colours are the sea and paper tokens from style.css. -->
+<style>.tile{fill:#0e5a70}.mark{fill:#fff;stroke:#fff}@media (prefers-color-scheme:dark){.tile{fill:#4fa7bf}.mark{fill:#0f1418;stroke:#0f1418}}</style>
+<rect class="tile" width="32" height="32" rx="7"/>
+<g class="mark" stroke-width="3.4" stroke-linecap="round">
+<path fill="none" d="M6.48 22.44A10.5 10.5 0 0 1 6.48 13.56M11.56 8.48A10.5 10.5 0 0 1 20.44 8.48M25.52 13.56A10.5 10.5 0 0 1 25.52 22.44"/>
+<path d="M16 18L18.87 13.9" stroke-width="2.8"/>
+<circle cx="16" cy="18" r="2.6" stroke="none"/>
+</g>
+</svg>

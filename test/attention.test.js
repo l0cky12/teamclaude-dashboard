@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { attention, meters, severity, nextReset, sortForAttention, formatDuration, remaining, issues } from '../lib/attention.js';
+import { attention, meters, severity, nextReset, sortForAttention, formatDuration, remaining, issues, resetsBetween } from '../lib/attention.js';
 
 const now = 1_800_000_000_000;
 const base = { name: 'a@x', status: 'active', unavailable: null, quota: { unified7d: 0.72, unified7dReset: now + 3 * 86400e3, unified7dFable: 0.67, unified7dFableReset: now + 3 * 86400e3 }, auth: { hasRefreshToken: true } };
@@ -92,4 +92,14 @@ test('issues counts accounts with real problems, not near-limit ones', () => {
   assert.ok(out[0].items.every(i => i.kind === 'signin'));
   assert.equal(out[1].items[0].kind, 'blocked');
   assert.deepEqual(issues([{ ...base, name: 'near', quota: { unified7d: 0.95 } }], { now }), []);
+});
+
+test('resetsBetween finds windows resetting in the range, skipping paused accounts', () => {
+  const a = { name: 'a', quota: { unified5h: 1, unified5hReset: now + 30e3, unified7d: 0.5, unified7dReset: now + 86400e3 } };
+  assert.equal(resetsBetween([a], now - 60e3, now + 60e3), true);
+  assert.equal(resetsBetween([a], now, now + 30e3), true); // end is inclusive
+  assert.equal(resetsBetween([a], now + 30e3, now + 60e3), false); // start is not
+  assert.equal(resetsBetween([{ ...a, disabled: true }], now - 60e3, now + 60e3), false);
+  assert.equal(resetsBetween([{ name: 'b', quota: { unified5h: 0 } }], 0, Infinity), false);
+  assert.equal(resetsBetween(undefined, 0, Infinity), false);
 });

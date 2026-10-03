@@ -6,12 +6,14 @@ multi-account proxy. It shows, for every pooled Claude and Codex account:
 - which accounts need a human (errors, rejected credentials, expired sign-ins, near-limit windows), listed first with a one-click fix;
 - a timeline of when each quota window resets, so you can see the order capacity comes back;
 - Capacity ranges for upcoming resets, past 24 hours, past 7 days, past 30 days, and all recorded resets;
-- per-window meters (5-hour session, weekly, per-model) with reset countdowns and staleness;
+- per-window meters (5-hour session, weekly, per-model) with reset countdowns and staleness; in the last minute before a window resets the page refreshes every 2 seconds, and once it resets the dashboard asks the proxy to read the new figure right away (a zero-spend usage check) instead of waiting for that account's next request;
 - request and token usage, active sessions, and the proxy's routing share;
 - sign-in for Claude and Codex accounts from the browser, no terminal needed;
 - users: give each person their own proxy key and see their requests and tokens (all time, last 24 h, last 5 h);
 - a request log: what finished in each polling interval, by user and by account, with no prompt contents stored;
-- light, dark, or system theme.
+- light, dark, or system theme;
+- sign-in with your own dashboard account and role (admin, operator, viewer);
+  a device remembers several accounts, so switching is one click.
 
 ![Dashboard in light mode](docs/screenshot-light.png)
 
@@ -26,7 +28,7 @@ The proxy listens on `127.0.0.1:3456` by default, so the container shares the
 host network. The config file's directory is mounted so sign-ins can be saved.
 
 ```sh
-cp .env.example .env     # set DASHBOARD_PASSWORD if the port is reachable by others
+cp .env.example .env     # set DASHBOARD_PASSWORD: it guards creating the first admin
 docker compose up -d --build
 ```
 
@@ -37,7 +39,7 @@ goes to the data directory, which the compose file also mounts.
 | Variable | Default | Meaning |
 |---|---|---|
 | `PORT` | `8787` | Port the dashboard listens on |
-| `DASHBOARD_PASSWORD` | empty | HTTP Basic auth password (any username). Strongly recommended. |
+| `DASHBOARD_PASSWORD` | empty | Setup password: needed to create the first admin sign-in, and still accepted as Basic auth by scripts. Strongly recommended. |
 | `TEAMCLAUDE_URL` | `http://127.0.0.1:3456` | Where the proxy listens |
 | `TEAMCLAUDE_CONFIG_DIR` | `~/.config` | Directory containing `teamclaude.json` |
 | `TEAMCLAUDE_API_KEY` | from config | Override the proxy key if the config is not mounted |
@@ -53,8 +55,9 @@ the config the proxy reads, so remote setups can view but not add accounts.
 The dashboard binds every interface on the host, so with Tailscale on the
 machine it is reachable from any device on your tailnet at
 `http://<tailscale-ip>:<PORT>` or `http://<machine-name>:<PORT>` with MagicDNS.
-The browser asks for the password once (any username). Keep
-`DASHBOARD_PASSWORD` set whenever the port is reachable beyond localhost.
+Everyone signs in with their own dashboard account (see below). Keep
+`DASHBOARD_PASSWORD` set whenever the port is reachable beyond localhost, so
+nobody else can claim the first admin account.
 
 ## Run without Docker
 
@@ -102,11 +105,26 @@ is kept across restarts without the request log's seven-day cutoff; All time
 shows all recorded past resets. History starts when this version first observes
 quotas, so it cannot reconstruct resets from before then.
 
+## Dashboard sign-ins
+
+On a fresh dashboard, `/login` offers to create the first admin account; if
+`DASHBOARD_PASSWORD` is set it is required as the setup password. Admins add
+more sign-ins under Logs & users, each with a role: admins manage everything,
+operators can act on accounts and proxy users, viewers can only look. Accounts
+are stored hashed in `users.json` in the data directory, next to a random
+`secret` that signs session cookies, so sessions survive restarts. A device
+remembers the accounts that signed in on it and offers them on the next visit;
+the avatar menu in the header switches between them or signs out. Dashboard
+sign-ins are separate from proxy users, which are keys for tools.
+Remembering an account saves only its name and role. Choose "Keep me signed
+in on this device" separately to keep the session for 30 days.
+
 ## Security notes
 
-- Anyone who can reach the dashboard can switch, pause and re-sign accounts, and
-  the dashboard holds the proxy's API key. Set `DASHBOARD_PASSWORD` and keep the
-  port on a trusted network.
+- Admins and operators can switch, pause and re-sign proxy accounts; viewers
+  are read-only. The dashboard holds the proxy's API key. Set
+  `DASHBOARD_PASSWORD` to protect first-admin setup and keep the port on a
+  trusted network.
 - State-changing requests are refused when a browser sends a foreign `Origin`.
 - Static files are served with a strict Content Security Policy; the only
   external resource is the IBM Plex Sans font from Google Fonts, which falls back

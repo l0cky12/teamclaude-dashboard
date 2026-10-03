@@ -1,0 +1,49 @@
+--- a/src/account-manager.js	2026-10-03 02:56:14.570949423 +0000
++++ b/src/account-manager.js	2026-10-03 02:56:26.737865432 +0000
+@@ -217,6 +217,8 @@
+   return out;
+ }
+ 
++const emptyModelUsage = () => ({ inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, reports: 0 });
++
+ /**
+  * The per-account switchThreshold an account will actually gate on: the config
+  * entry's value with anything outside (0, 1] dropped, and one line telling the
+@@ -400,6 +402,13 @@
+       // weekly, so what a point there costs is its own question, and a sum
+       // across families cannot be taken apart afterwards.
+       byBucket: {},
++      // All four totals split by the model the client asked for, so a reader
++      // can price each model at its own rate. A bucket cannot do that: the
++      // shared weekly holds Opus, Haiku and every unrecognised model together,
++      // and a Codex account books everything there. Keyed by the request's
++      // model string as sent (a client-chosen string, hence no prototype); a
++      // request with none lands on "unknown".
++      byModel: Object.create(null),
+       totalRequests: 0,
+       lastUsed: null,
+     },
+@@ -4342,6 +4351,14 @@
+         || (account.usage.byBucket[bucket] = { cacheReadTokens: 0, cacheCreationTokens: 0 });
+       per.cacheReadTokens += read;
+       per.cacheCreationTokens += creation;
++      const key = typeof model === 'string' && model ? model : 'unknown';
++      const byModel = account.usage.byModel || (account.usage.byModel = Object.create(null));
++      const m = Object.hasOwn(byModel, key) ? byModel[key] : (byModel[key] = emptyModelUsage());
++      m.inputTokens += Number.isFinite(usage.input_tokens) ? usage.input_tokens : 0;
++      m.outputTokens += Number.isFinite(usage.output_tokens) ? usage.output_tokens : 0;
++      m.cacheReadTokens += read;
++      m.cacheCreationTokens += creation;
++      m.reports++;
+     }
+     // A request with no session id (or one the tracker has forgotten) is still a
+     // real spend by the account, so the two scopes are recorded independently.
+@@ -4999,7 +5016,7 @@
+         // number on the same object stayed put. Every in-process reader today
+         // serialises it straight away, so this holds a property rather than
+         // fixing a live defect.
+-        usage: { ...a.usage, byBucket: copyBuckets(a.usage.byBucket) },
++        usage: { ...a.usage, byBucket: copyBuckets(a.usage.byBucket), byModel: Object.fromEntries(Object.entries(a.usage.byModel || {}).map(([k, v]) => [k, { ...v }])) },
+         rateLimitedUntil: a.rateLimitedUntil
+           ? new Date(a.rateLimitedUntil).toISOString()
+           : null,

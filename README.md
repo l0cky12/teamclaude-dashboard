@@ -110,6 +110,17 @@ sign-ins are separate from proxy users, which are keys for tools.
 Remembering an account saves only its name and role. Choose "Keep me signed
 in on this device" separately to keep the session for 30 days.
 
+## API cost estimate
+
+The cost section prices traffic at Anthropic and OpenAI API list prices
+(`lib/cost.js`). Team Claude 1.1.22 counts tokens per account and quota bucket,
+not per model, so Fable-bucket traffic is priced as Fable 5.1, the rest of
+Claude as Opus 5.5, and Codex as a range between the cheapest and dearest model
+each account has served. `docs/upstream/teamclaude-usage-by-model.patch` adds a
+per-model counter (`usage.byModel`) to Team Claude; with it applied, the
+dashboard prices every model exactly, Claude and Codex alike, with no change
+here. Apply it in a Team Claude checkout with `git apply`.
+
 ## Security notes
 
 - Admins and operators can switch, pause and re-sign proxy accounts; viewers

@@ -531,7 +531,10 @@ $('#log-who').addEventListener('change', () => last && renderLog(last));
 
 // ── API cost estimate ───────────────────────────────────────────────────────
 const usd = n => n.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
-const MODEL_NAMES = { 'claude-opus-5-5': 'Claude Opus 5.5', 'claude-fable-5-1': 'Claude Fable 5.1', codex: 'Codex (not priced)', unknown: 'Logged before pricing (not priced)' };
+const usdRange = (lo, hi) => hi - lo < 0.005 ? usd(lo) : `${usd(lo)} – ${usd(hi)}`;
+const MODEL_NAMES = { 'claude-opus-5-5': 'Claude Opus 5.5', 'claude-fable-5-1': 'Claude Fable 5.1', 'claude-sonnet-5-5': 'Claude Sonnet 5.5', 'claude-haiku-4-5': 'Claude Haiku 4.5', codex: 'Codex, model split unknown', unknown: 'Logged before pricing' };
+// what a priced-as-a-range Codex row was priced between
+const modelHint = m => m.candidates?.length ? `priced as ${m.candidates.join(', ')}` : null;
 const seg = id => $(`#${id} [aria-pressed="true"]`).dataset;
 for (const id of ['cost-range', 'cost-by']) {
   $(`#${id}`).addEventListener('click', e => {
@@ -552,15 +555,18 @@ function renderCost(s) {
   } else {
     binMs = Number(range) > 86400e3 ? 6 * 3600e3 : 3600e3;
     const since = now - Number(range);
-    r = usageReport(ticks, { since, until: now, binMs });
+    const seen = Object.fromEntries((s.accounts || []).filter(a => a.provider === 'codex').map(a => [a.name, Object.keys(a.quota?.codexModelLimits || {})]));
+    r = usageReport(ticks, { since, until: now, binMs, seen });
   }
   const t = r.total;
 
-  $('#cost-hero').textContent = usd(t.cost);
+  const ranged = t.costHigh - t.cost >= 0.005;
+  $('#cost-hero').replaceChildren(usd(t.cost), ranged ? h('span', { class: 'hi' }, `up to ${usd(t.costHigh)}`) : '');
   const unpricedPct = t.tokens ? t.unpriced / t.tokens : 0;
   $('#cost-sub').textContent = [
     `${compact(t.requests)} requests across ${Object.keys(r.accounts).length} accounts`,
     unpricedPct ? `excludes ${unpricedPct < 0.001 ? 'under 0.1' : (unpricedPct * 100).toFixed(1)}% unpriced tokens` : null,
+    ranged ? 'Codex priced as a range' : null,
     range === 'all' ? 'since the proxy started counting' : null,
   ].filter(Boolean).join(' · ');
 
@@ -579,31 +585,38 @@ function renderCost(s) {
   );
 
   const by = seg('cost-by').by;
+  const priced = o => o.tokens && o.unpriced >= o.tokens ? null : o.cost;
+  const order = (a, b) => (b.cost ?? -1) - (a.cost ?? -1) || b.tokens - a.tokens;
+  const modelRows = ms => Object.entries(ms).map(([k, m]) => ({ name: MODEL_NAMES[k] || k, sub: modelHint(m), cost: priced(m), costHigh: m.costHigh, tokens: m.tokens })).sort(order);
   const entries = by === 'model'
-    ? Object.entries(r.models).map(([k, m]) => ({ name: MODEL_NAMES[k] || k, cost: m.priced ? m.cost : null, tokens: m.tokens }))
+    ? modelRows(r.models)
     : Object.entries(r.accounts).map(([k, a]) => {
       // older log rows don't record the provider, so the live account list wins
       const provider = (s.accounts || []).find(x => x.name === k)?.provider || a.provider;
-      return { name: k, sub: providerName(provider), cost: provider === 'codex' || (a.tokens && a.unpriced >= a.tokens) ? null : a.cost, tokens: a.tokens, requests: a.requests };
-    });
-  entries.sort((a, b) => (b.cost ?? -1) - (a.cost ?? -1) || b.tokens - a.tokens);
+      const models = modelRows(a.models);
+      // one model row that is the whole account says nothing the account row doesn't
+      const detail = models.length > 1 ? models : [];
+      return { name: k, sub: [providerName(provider), models.length === 1 ? models[0].sub : null].filter(Boolean).join(' · '), cost: priced(a), costHigh: a.costHigh, tokens: a.tokens, requests: a.requests, detail };
+    }).sort(order);
   const share = c => c == null ? '—' : t.cost ? `${(c / t.cost * 100).toFixed(1)}%` : '0%';
+  const row = (e, cls = 'crow') => h('div', { class: cls },
+    h('div', {}, h('div', { class: 'name' }, e.name), e.sub ? h('div', { class: 'hint' }, e.sub) : null),
+    h('div', { class: `num${e.cost == null ? ' muted' : ''}` }, e.cost == null ? 'Unpriced' : usdRange(e.cost, e.costHigh)),
+    h('div', { class: 'num muted' }, share(e.cost)),
+    h('div', { class: 'num' }, compact(Math.round(e.tokens))),
+    h('div', { class: 'num muted' }, e.requests != null ? compact(e.requests) : ''),
+  );
   $('#cost-table').replaceChildren(h('div', { class: 'ledger' },
     h('div', { class: 'crow head' }, h('div', {}, by === 'model' ? 'Model' : 'Account'), h('div', { class: 'num' }, 'Cost'), h('div', { class: 'num' }, 'Share'), h('div', { class: 'num' }, 'Tokens'), h('div', { class: 'num' }, by === 'model' ? '' : 'Requests')),
-    ...(entries.length ? entries.map(e => h('div', { class: 'crow' },
-      h('div', {}, h('div', { class: 'name' }, e.name), e.sub ? h('div', { class: 'hint' }, e.sub) : null),
-      h('div', { class: `num${e.cost == null ? ' muted' : ''}` }, e.cost == null ? 'Unpriced' : usd(e.cost)),
-      h('div', { class: 'num muted' }, share(e.cost)),
-      h('div', { class: 'num' }, compact(Math.round(e.tokens))),
-      h('div', { class: 'num muted' }, e.requests != null ? compact(e.requests) : ''),
-    )) : [h('div', { class: 'empty-note' }, 'No traffic in this range yet.')]),
+    ...(entries.length ? entries.flatMap(e => [row(e), ...(e.detail || []).map(m => row(m, 'crow sub'))]) : [h('div', { class: 'empty-note' }, 'No traffic in this range yet.')]),
   ));
 }
 
 function renderCostChart(bins, binMs, now) {
   const root = $('#cost-chart');
   const W = Math.max(320, root.clientWidth || 640), H = 220, left = 52, right = 8, top = 10, bottom = 24;
-  const max = Math.max(...bins.map(b => b.cost));
+  const max = Math.max(...bins.map(b => b.costHigh));
+  const ranged = bins.some(b => b.costHigh - b.cost >= 0.005);
   // round the axis up to a 1/2/5 step so gridlines land on readable values
   const step = (() => { const raw = (max || 1) / 4, p = 10 ** Math.floor(Math.log10(raw)); return [1, 2, 5, 10].map(m => m * p).find(v => v >= raw); })();
   const yMax = step * 4;
@@ -621,6 +634,7 @@ function renderCostChart(bins, binMs, now) {
   const pts = bins.map((b, i) => `${x(i)},${y(b.cost)}`).join(' ');
   el.append(svg('polygon', { class: 'area', points: `${x(0)},${y(0)} ${pts} ${x(bins.length - 1)},${y(0)}` }));
   el.append(svg('polyline', { class: 'line', points: pts }));
+  if (ranged) el.append(svg('polyline', { class: 'line high', points: bins.map((b, i) => `${x(i)},${y(b.costHigh)}`).join(' ') }));
   const cross = svg('line', { class: 'cross', y1: top, y2: H - bottom, visibility: 'hidden' });
   const dot = svg('circle', { class: 'dot', r: 4, visibility: 'hidden' });
   const hit = svg('rect', { class: 'hit', x: left, y: top, width: W - left - right, height: H - top - bottom });
@@ -636,12 +650,12 @@ function renderCostChart(bins, binMs, now) {
     dot.setAttribute('cx', x(i)); dot.setAttribute('cy', y(b.cost));
     cross.setAttribute('visibility', 'visible'); dot.setAttribute('visibility', 'visible');
     const end = Math.min(b.at + binMs, now);
-    const accts = Object.entries(b.accounts).sort((p, q) => q[1] - p[1]);
+    const accts = Object.entries(b.accounts).sort((p, q) => q[1].costHigh - p[1].costHigh);
     tip.replaceChildren(...[
       h('div', { class: 'when' }, `${new Date(b.at).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })} – ${new Date(end).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`),
-      ...accts.slice(0, 6).map(([n, c]) => h('div', { class: 'kv' }, h('span', {}, n.replace(/@.*/, '')), h('span', {}, usd(c)))),
+      ...accts.slice(0, 6).map(([n, c]) => h('div', { class: 'kv' }, h('span', {}, n.replace(/@.*/, '')), h('span', {}, usdRange(c.cost, c.costHigh)))),
       accts.length > 6 ? h('div', { class: 'kv muted' }, h('span', {}, `${accts.length - 6} more`), h('span', {}, '')) : null,
-      h('div', { class: 'kv total' }, h('span', {}, 'Total'), h('span', {}, usd(b.cost))),
+      h('div', { class: 'kv total' }, h('span', {}, 'Total'), h('span', {}, usdRange(b.cost, b.costHigh))),
     ].filter(Boolean));
     tip.hidden = false;
     const fx = x(i) / W * box.width;

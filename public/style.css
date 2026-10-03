@@ -237,6 +237,7 @@ input:not([type]) { min-width: 240px; }
 .cost-top { display: grid; grid-template-columns: minmax(200px, 1fr) minmax(0, 2fr); gap: 24px; margin: 8px 0 20px; align-items: start; }
 .cost-top h3 { margin-top: 0; }
 .hero { font-size: 48px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; }
+#cost-hero .hi { display: block; font-size: .42em; font-weight: 500; color: var(--ink-2); margin-top: 2px; }
 #cost-sub { margin-top: 6px; }
 #cost-chart { position: relative; }
 #cost-chart svg { width: 100%; height: auto; display: block; }
@@ -244,6 +245,7 @@ input:not([type]) { min-width: 240px; }
 #cost-chart .grid { stroke: var(--hair); stroke-width: 1; }
 #cost-chart .area { fill: var(--sea); opacity: .12; }
 #cost-chart .line { fill: none; stroke: var(--sea); stroke-width: 2; stroke-linejoin: round; }
+#cost-chart .line.high { stroke-dasharray: 4 4; stroke-width: 1.5; }
 #cost-chart .cross { stroke: var(--ink-3); stroke-width: 1; }
 #cost-chart .dot { fill: var(--sea); stroke: var(--surface); stroke-width: 2; }
 #cost-chart .hit { fill: transparent; }
@@ -261,6 +263,9 @@ input:not([type]) { min-width: 240px; }
 .crow .name { font-weight: 500; word-break: break-all; }
 .crow .hint { color: var(--ink-3); font-size: 12px; }
 .crow .num { text-align: right; }
+.crow.sub { border-top: 0; padding-top: 0; font-size: 13px; }
+.crow.sub > :first-child { padding-left: 16px; }
+.crow.sub .name { font-weight: 400; color: var(--ink-2); }
 @media (max-width: 900px) {
   .cost-top { grid-template-columns: 1fr; }
   .crow { grid-template-columns: 1fr repeat(3, auto); }

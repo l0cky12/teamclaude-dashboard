@@ -86,6 +86,16 @@ test('malformed cookies do not terminate the server', async t => {
   assert.equal((await d.request('/api/session')).status, 200);
 });
 
+test('the sign-in page and its favicon load signed out; the dashboard does not', async t => {
+  const d = await dashboard(t);
+  const get = p => fetch(`http://127.0.0.1:${d.port}${p}`, { redirect: 'manual' });
+  const icon = await get('/favicon.svg');
+  assert.equal(icon.status, 200);
+  assert.equal(icon.headers.get('content-type'), 'image/svg+xml');
+  assert.match(await (await get('/login')).text(), /rel="icon" type="image\/svg\+xml" href="\/favicon.svg"/);
+  assert.equal((await get('/app.js')).status, 401);
+});
+
 test('parallel sign-ins and account additions persist across restart', async t => {
   const d = await dashboard(t);
   const cookie = await setup(d);

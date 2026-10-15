@@ -12,7 +12,7 @@ import { buildCodexAuthUrl, exchangeCodexCode } from '@karpeleslab/teamclaude/sr
 import { oauthIdentityFields, findUpsertTarget, updateAccountEntry, canUpsertOAuthAccount, sameIdentity } from '@karpeleslab/teamclaude/src/identity.js';
 import { tick } from './lib/activity.js';
 import { observeResets, resetId } from './lib/capacity.js';
-import { hashPassword, verifyPassword, signToken, verifyToken, allowed, throttle, ROLES, NAME } from './lib/auth.js';
+import { hashPassword, authenticate, signToken, verifyToken, allowed, ROLES, NAME } from './lib/auth.js';
 import { resetsBetween } from './lib/attention.js';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
@@ -367,11 +367,9 @@ function requester(req) {
 async function signIn(req, res, body) {
   const name = String(body.name || '').trim();
   const user = await updateUsers(next => {
-    const wait = throttle(failures, name);
+    const { user, wait } = authenticate(next, failures, name, body.password);
     if (wait) throw fail(429, `Too many attempts. Try again in ${wait} minute${wait === 1 ? '' : 's'}.`);
-    const user = next.find(u => u.name === name);
-    if (!user || !verifyPassword(user, body.password)) {
-      failures.get(name).push(Date.now());
+    if (!user) {
       throw fail(401, "That name or password isn't right. Check them and try again.");
     }
     user.lastSignInAt = Date.now();

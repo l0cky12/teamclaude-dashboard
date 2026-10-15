@@ -5,7 +5,7 @@ import http from 'node:http';
 import { readFile, stat, appendFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import { join, extname, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
+import { randomBytes, createHash } from 'node:crypto';
 import { loadConfig, atomicConfigUpdate, getConfigPath } from '@karpeleslab/teamclaude/src/config.js';
 import { parseAuthCode, profileForCredentials, tokenPairFromResponse } from '@karpeleslab/teamclaude/src/oauth.js';
 import { buildCodexAuthUrl, exchangeCodexCode } from '@karpeleslab/teamclaude/src/codex-auth.js';
@@ -14,6 +14,7 @@ import { tick } from './lib/activity.js';
 import { observeResets, resetId } from './lib/capacity.js';
 import { hashPassword, verifyPassword, signToken, verifyToken, allowed, throttle, ROLES, NAME } from './lib/auth.js';
 import { resetsBetween } from './lib/attention.js';
+import { passwordGate } from './lib/password-gate.js';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const PORT = Number(process.env.PORT) || 8787;
@@ -320,7 +321,8 @@ const USERS_FILE = join(DATA_DIR, 'users.json');
 const SECRET_FILE = join(DATA_DIR, 'secret');
 const SESSION_MS = { remember: 30 * 86400e3, once: 86400e3 };
 const fail = (status, message) => Object.assign(new Error(message), { status });
-const safeEqual = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && timingSafeEqual(x, y); };
+const checkSharedPassword = passwordGate(PASSWORD);
+const basicResult = Symbol('basicResult');
 let users = [];
 let secret = '';
 const failures = new Map(); // name -> timestamps of wrong passwords
@@ -360,7 +362,11 @@ function requester(req) {
   const user = verifyToken(secret, users, cookie(req, 'tc_session'));
   if (user) return user;
   const h = req.headers.authorization || '';
-  if (PASSWORD && h.startsWith('Basic ') && safeEqual(Buffer.from(h.slice(6), 'base64').toString('utf8').split(':').slice(1).join(':'), PASSWORD)) return { name: 'password', role: 'admin' };
+  if (PASSWORD && h.startsWith('Basic ')) {
+    // Only memoize this header's comparison. Cookie authority is rechecked above.
+    if (!(basicResult in req)) req[basicResult] = checkSharedPassword(Buffer.from(h.slice(6), 'base64').toString('utf8').split(':').slice(1).join(':'));
+    if (req[basicResult]) return { name: 'password', role: 'admin' };
+  }
   return null;
 }
 
@@ -397,7 +403,7 @@ async function accountAction(req, body) {
     const idx = users.findIndex(u => u.name === name);
     if (action === 'setup') {
       if (users.length) throw fail(409, 'This dashboard already has accounts. Sign in as an admin to add more.');
-      if (PASSWORD && !safeEqual(body.setupPassword || '', PASSWORD)) throw fail(403, "The setup password isn't right.");
+      if (PASSWORD && !checkSharedPassword(body.setupPassword || '')) throw fail(403, "The setup password isn't right.");
       users.push({ name, role: 'admin', ...hashPassword(password), createdAt: Date.now() });
     } else if (action === 'add') {
       if (idx >= 0) throw fail(409, `There is already an account named ${name}.`);

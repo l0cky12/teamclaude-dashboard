@@ -7,7 +7,7 @@ import { mkdtemp, readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-async function dashboard(t) {
+async function dashboard(t, { password = 'setup-password' } = {}) {
   const dir = await mkdtemp(join(tmpdir(), 'dashboard-auth-'));
   const proxy = http.createServer((req, res) => {
     res.setHeader('content-type', 'application/json');
@@ -35,7 +35,7 @@ async function dashboard(t) {
     child = spawn(process.execPath, ['server.js'], {
       cwd: new URL('..', import.meta.url),
       env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', DASHBOARD_DATA_DIR: dir,
-        DASHBOARD_PASSWORD: 'setup-password', TEAMCLAUDE_CONFIG: join(dir, 'config.json'),
+        DASHBOARD_PASSWORD: password, TEAMCLAUDE_CONFIG: join(dir, 'config.json'),
         TEAMCLAUDE_API_KEY: 'test', TEAMCLAUDE_URL: `http://127.0.0.1:${proxyPort}` },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -48,9 +48,9 @@ async function dashboard(t) {
     }
     throw new Error(`Server did not start: ${log}`);
   };
-  const request = async (path, body, cookie, method = body ? 'POST' : 'GET') => {
+  const request = async (path, body, cookie, method = body ? 'POST' : 'GET', headers = {}) => {
     const response = await fetch(`http://127.0.0.1:${port}${path}`, {
-      method, redirect: 'manual', headers: { ...(body ? { 'content-type': 'application/json' } : {}), ...(cookie ? { cookie } : {}) },
+      method, redirect: 'manual', headers: { ...(body ? { 'content-type': 'application/json' } : {}), ...(cookie ? { cookie } : {}), ...headers },
       body: body ? JSON.stringify(body) : undefined,
     });
     return { status: response.status, cookie: response.headers.get('set-cookie'), body: await response.json().catch(() => null) };
@@ -163,4 +163,63 @@ test('revoking an operator rejects mutations with bodies still in flight', async
     req.end(JSON.stringify({ action: 'probe', provider: 'anthropic' }));
     assert.equal(await response, 401);
   }
+});
+
+const basic = (name, password) => ({ authorization: `Basic ${Buffer.from(`${name}:${password}`).toString('base64')}` });
+
+test('Basic and setup share a guessing limit across usernames, names and routes', async t => {
+  const d = await dashboard(t);
+  for (const [i, path] of ['/api/status', '/api/capacity', '/app.js'].entries()) {
+    assert.equal((await d.request(path, null, null, 'GET', basic(`script${i}`, 'wrong'))).status, 401);
+  }
+  for (let i = 0; i < 2; i++) {
+    assert.equal((await d.request('/api/accounts', { action: 'setup', name: `admin${i}`, password: 'admin-password', setupPassword: 'wrong' })).status, 403);
+  }
+  assert.equal((await d.request('/api/accounts', { action: 'setup', ...admin, setupPassword: 'setup-password' })).status, 429);
+  assert.equal((await d.request('/api/accounts', null, null, 'GET', basic('another-script', 'setup-password'))).status, 429);
+});
+
+test('Basic failures are counted once across queued authorization rechecks', async t => {
+  const d = await dashboard(t);
+  for (let i = 0; i < 5; i++) {
+    assert.equal((await d.request('/api/accounts', { action: 'add', ...admin, role: 'admin' }, null, 'POST', basic(`script${i}`, 'wrong'))).status, 403);
+  }
+  assert.equal((await d.request('/api/accounts', null, null, 'GET', basic('', 'setup-password'))).status, 429);
+});
+
+test('valid Basic scripts and named sessions retain their independent behavior', async t => {
+  const password = 'setup:password:with-colons';
+  const d = await dashboard(t, { password });
+  assert.equal((await d.request('/api/accounts', { action: 'setup', ...admin, setupPassword: password })).status, 200);
+  const signed = await d.request('/api/session', admin);
+  for (let i = 0; i < 7; i++) {
+    const headers = basic(i ? `script${i}` : '', password);
+    assert.equal((await d.request('/api/accounts', null, null, 'GET', headers)).status, 200);
+    assert.equal((await d.request('/api/control', { action: 'probe' }, null, 'POST', headers)).status, 200);
+  }
+  for (let i = 0; i < 5; i++) assert.equal((await d.request('/api/accounts', null, null, 'GET', basic(`other${i}`, 'wrong'))).status, 401);
+  assert.equal((await d.request('/api/accounts', null, null, 'GET', basic('', password))).status, 429);
+  assert.equal((await d.request('/api/accounts', null, signed.cookie)).status, 200);
+  assert.equal((await d.request('/api/session', admin)).status, 200);
+  assert.equal((await d.request('/api/accounts')).status, 401);
+});
+
+test('setup without a shared password still works', async t => {
+  const d = await dashboard(t, { password: '' });
+  assert.equal((await d.request('/api/accounts', { action: 'setup', ...admin })).status, 200);
+  assert.equal((await d.request('/api/session', admin)).status, 200);
+  assert.equal((await d.request('/api/accounts', null, null, 'GET', basic('', ''))).status, 401);
+});
+
+test('resetting an admin rejects an account mutation whose body is still in flight', async t => {
+  const d = await dashboard(t);
+  const cookie = await setup(d);
+  await d.request('/api/accounts', { action: 'add', name: 'backup', password: 'backup-password', role: 'admin' }, cookie);
+  const backup = await d.request('/api/session', { name: 'backup', password: 'backup-password' });
+  const req = http.request(`http://127.0.0.1:${d.port}/api/accounts`, { method: 'POST', headers: { cookie, 'content-type': 'application/json' } });
+  const response = new Promise((resolve, reject) => { req.on('response', r => { r.resume(); resolve(r.statusCode); }); req.on('error', reject); });
+  req.flushHeaders();
+  assert.equal((await d.request('/api/accounts', { action: 'reset', name: admin.name, password: 'replacement-password' }, backup.cookie)).status, 200);
+  req.end(JSON.stringify({ action: 'add', name: 'intruder', password: 'intruder-password', role: 'admin' }));
+  assert.equal(await response, 403);
 });

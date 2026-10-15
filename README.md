@@ -136,6 +136,10 @@ here. Apply it in a Team Claude checkout with `git apply`.
   are read-only. The dashboard holds the proxy's API key. Set
   `DASHBOARD_PASSWORD` to protect first-admin setup and keep the port on a
   trusted network.
+- Basic authentication and first-admin setup share a limit of five wrong
+  `DASHBOARD_PASSWORD` attempts in fifteen minutes. Further attempts return
+  HTTP 429 until the window expires; named dashboard sign-ins keep their own
+  separate limits.
 - State-changing requests are refused when a browser sends a foreign `Origin`.
 - Static files are served with a strict Content Security Policy; the only
   external resource is the IBM Plex Sans font from Google Fonts, which falls back

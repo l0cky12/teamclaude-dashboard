@@ -80,6 +80,16 @@ test('first-admin setup cannot be bypassed with another account action or delaye
   assert.deepEqual(stored.users.map(u => u.name), ['admin']);
 });
 
+test('unknown and oversized sign-in names cannot bypass a real account lockout', async t => {
+  const d = await dashboard(t);
+  await setup(d);
+  for (let i = 0; i < 5; i++) assert.equal((await d.request('/api/session', { ...admin, password: 'wrong' })).status, 401);
+  for (const name of [...Array.from({ length: 12 }, (_, i) => `unknown-${i}`), 'x'.repeat(60_000)]) {
+    assert.equal((await d.request('/api/session', { name, password: 'wrong' })).status, 401);
+  }
+  assert.equal((await d.request('/api/session', admin)).status, 429);
+});
+
 test('malformed cookies do not terminate the server', async t => {
   const d = await dashboard(t);
   assert.equal((await d.request('/api/status', null, 'tc_session=%')).status, 401);

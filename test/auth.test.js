@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { hashPassword, verifyPassword, signToken, verifyToken, allowed, throttle } from '../lib/auth.js';
+import { hashPassword, verifyPassword, signToken, verifyToken, allowed, throttle, authenticate } from '../lib/auth.js';
 
 const secret = 'test-secret';
 const liam = { name: 'liam', role: 'admin', ...hashPassword('correct horse') };
@@ -55,4 +55,42 @@ test('throttle locks a name after five recent failures and forgets old ones', ()
   assert.ok(throttle(f, 'liam', t0 + 10) >= 1, 'locked, minutes left');
   assert.equal(throttle(f, 'sam', t0 + 10), 0, 'other names unaffected');
   assert.equal(throttle(f, 'liam', t0 + 16 * 60_000), 0, 'window passed');
+});
+
+test('unknown-name spray retains no state and cannot evict an account lockout', () => {
+  const failures = new Map();
+  const now = 1_000_000;
+  for (let i = 0; i < 5; i++) assert.deepEqual(authenticate(users, failures, liam.name, 'wrong', now), { user: null, wait: 0 });
+  for (let i = 0; i < 1000; i++) {
+    assert.deepEqual(authenticate(users, failures, `unknown-${i}`, 'wrong', now), { user: null, wait: 0 });
+  }
+  for (const name of ['', 'x'.repeat(60_000), 'invalid/name', '__proto__', 'constructor']) {
+    assert.deepEqual(authenticate(users, failures, name, 'wrong', now), { user: null, wait: 0 });
+  }
+  assert.deepEqual([...failures.keys()], [liam.name]);
+  assert.equal(failures.get(liam.name).length, 5);
+  assert.ok(authenticate(users, failures, liam.name, 'correct horse', now).wait > 0);
+  assert.equal(authenticate(users, failures, sam.name, 'hunter2', now).user, sam);
+  assert.equal(failures.size, 1);
+});
+
+test('abandoned failures expire without retrying the same name', () => {
+  const failures = new Map();
+  const now = 1_000_000;
+  authenticate(users, failures, liam.name, 'wrong', now);
+  assert.equal(failures.size, 1);
+  authenticate(users, failures, 'unknown', 'wrong', now + 15 * 60_000);
+  assert.equal(failures.size, 0);
+  assert.equal(authenticate(users, failures, liam.name, 'correct horse', now + 15 * 60_000).user, liam);
+  assert.equal(failures.size, 0, 'successful sign-in leaves no failure state');
+});
+
+test('removed accounts do not leave failure keys and recreated accounts can sign in', () => {
+  const failures = new Map();
+  const now = 1_000_000;
+  authenticate(users, failures, liam.name, 'wrong', now);
+  authenticate([sam], failures, 'unknown', 'wrong', now);
+  assert.equal(failures.size, 0);
+  const replacement = { ...liam, ...hashPassword('replacement-password') };
+  assert.equal(authenticate([replacement, sam], failures, liam.name, 'replacement-password', now).user, replacement);
 });

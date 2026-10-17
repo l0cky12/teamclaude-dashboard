@@ -15,6 +15,7 @@ import { observeResets, resetId } from './lib/capacity.js';
 import { hashPassword, verifyPassword, signToken, verifyToken, allowed, throttle, ROLES, NAME } from './lib/auth.js';
 import { resetsBetween } from './lib/attention.js';
 import { diffEvents } from './lib/events.js';
+import { loadLog, appendLog } from './lib/logfile.js';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const PORT = Number(process.env.PORT) || 8787;
@@ -87,29 +88,10 @@ let latest = null, latestAt = 0, latestReadAt = 0, pollError = null, polling = n
 let ticks = [];
 /** @type {ReturnType<typeof diffEvents>} */
 let events = [];
+/** When the snapshot in `latest` was received: event diffs are timed by arrival, not by when the fetch began. */
+let latestSeenAt = 0;
 
-/** Rows of a JSONL log newer than the retention cutoff, compacted back to disk. */
-async function loadLog(file) {
-  await mkdir(DATA_DIR, { recursive: true });
-  try {
-    const cutoff = Date.now() - RETAIN_MS;
-    const rows = (await readFile(file, 'utf8')).split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(t => t && t.at >= cutoff);
-    await writeFile(file, rows.map(t => JSON.stringify(t)).join('\n') + (rows.length ? '\n' : ''));
-    return rows;
-  } catch (err) { if (err.code !== 'ENOENT') console.error(`[dashboard] could not read ${file}: ${err.message}`); return []; }
-}
-
-/** Append rows to a JSONL log and its in-memory copy, dropping what is past retention. */
-async function appendLog(file, list, rows) {
-  if (!rows.length) return list;
-  list.push(...rows);
-  // ponytail: the file only grows between restarts; loadLog() compacts it on start.
-  await appendFile(file, rows.map(r => JSON.stringify(r) + '\n').join('')).catch(err => console.error(`[dashboard] could not write ${file}: ${err.message}`));
-  const cutoff = Date.now() - RETAIN_MS;
-  return list.length && list[0].at < cutoff ? list.filter(x => x.at >= cutoff) : list;
-}
-
-async function recordEvents(rows) { events = await appendLog(EVENTS_FILE, events, rows); }
+async function recordEvents(rows) { events = await appendLog(EVENTS_FILE, events, rows, { retainMs: RETAIN_MS }); }
 
 async function loadResets() {
   try {
@@ -154,11 +136,14 @@ async function pollOnce() {
       else console.error(`[dashboard] quota probe after a reset failed: ${probe.json?.error || `proxy answered ${probe.status}`}`);
     }
     const t = tick(latest, next);
-    const changed = diffEvents(latest, next, readAt, latestReadAt);
-    latest = next; latestAt = Date.now(); latestReadAt = readAt; pollError = null;
+    // A reset that happens while the status request is in flight is already in
+    // `next`, so the window is judged by when the snapshot arrived.
+    const seenAt = Date.now();
+    const changed = diffEvents(latest, next, seenAt, latestSeenAt);
+    latest = next; latestAt = seenAt; latestSeenAt = seenAt; latestReadAt = readAt; pollError = null;
     const resets = observeResets(resetHistory, next.accounts, latestAt);
     await saveResets(resets);
-    if (t) ticks = await appendLog(ACTIVITY_FILE, ticks, [t]);
+    if (t) ticks = await appendLog(ACTIVITY_FILE, ticks, [t], { retainMs: RETAIN_MS });
     await recordEvents(changed);
   } catch (err) {
     pollError = err;
@@ -540,8 +525,8 @@ async function handle(req, res) {
   }
 }
 
-ticks = await loadLog(ACTIVITY_FILE);
-events = await loadLog(EVENTS_FILE);
+ticks = await loadLog(ACTIVITY_FILE, { retainMs: RETAIN_MS });
+events = await loadLog(EVENTS_FILE, { retainMs: RETAIN_MS });
 await loadResets();
 await loadUsers();
 poll();

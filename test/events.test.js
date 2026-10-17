@@ -35,6 +35,14 @@ test('a window whose reset time passed between polls is logged as a reset', () =
   assert.deepEqual(diffEvents(prev, next, 70, 50), [], 'not yet when the reset is still ahead');
 });
 
+test('a Claude and a Codex account sharing a name are tracked apart', () => {
+  const both = (claudeExtra, codexExtra) => snap([acct('me@x', claudeExtra), acct('me@x', { provider: 'codex', ...codexExtra })], { anthropic: 'me@x' });
+  assert.deepEqual(diffEvents(both({}, { disabled: true }), both({}, { disabled: true }), 100, 50), [], 'unchanged snapshots log nothing');
+  const out = diffEvents(both({}, { disabled: true }), both({}, {}), 100, 50);
+  assert.deepEqual(out.map(e => [e.provider, e.kind, e.text]), [['codex', 'paused', 'Resumed']]);
+  assert.deepEqual(diffEvents(both({}, {}), both({}, {}), 100, 50), [], 'the Claude one serving does not read as the Codex one serving');
+});
+
 test('accounts missing from the earlier snapshot are skipped', () => {
   assert.deepEqual(diffEvents(snap([]), snap([acct('new')], { anthropic: 'new' }), 10, 5), []);
 });

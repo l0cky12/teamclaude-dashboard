@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { attention, meters, severity, nextReset, sortForAttention, formatDuration, remaining, issues, resetsBetween } from '../lib/attention.js';
+import { attention, meters, severity, nextReset, sortForAttention, formatDuration, remaining, issues, resetsBetween, leftLevel } from '../lib/attention.js';
 
 const now = 1_800_000_000_000;
 const base = { name: 'a@x', status: 'active', unavailable: null, quota: { unified7d: 0.72, unified7dReset: now + 3 * 86400e3, unified7dFable: 0.67, unified7dFableReset: now + 3 * 86400e3 }, auth: { hasRefreshToken: true } };
@@ -102,4 +102,14 @@ test('resetsBetween finds windows resetting in the range, skipping paused accoun
   assert.equal(resetsBetween([{ ...a, disabled: true }], now - 60e3, now + 60e3), false);
   assert.equal(resetsBetween([{ name: 'b', quota: { unified5h: 0 } }], 0, Infinity), false);
   assert.equal(resetsBetween(undefined, 0, Infinity), false);
+});
+
+test('leftLevel colours by the rounded share left, so the stated boundaries hold', () => {
+  assert.equal(leftLevel(1), 'ok');
+  assert.equal(leftLevel(0.6), 'ok');
+  assert.equal(leftLevel(1 - 0.4), 'ok', '60% after floating-point subtraction');
+  assert.equal(leftLevel(0.59), 'warning');
+  assert.equal(leftLevel(1 - 0.8), 'warning', '20% after floating-point subtraction');
+  assert.equal(leftLevel(0.19), 'critical');
+  assert.equal(leftLevel(0), 'critical');
 });

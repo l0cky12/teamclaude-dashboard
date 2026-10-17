@@ -1,5 +1,5 @@
-import { meters, severity, issues, sortForAttention, formatDuration, remaining, resetsBetween } from '/lib/attention.js';
-import { tick, totals, select } from '/lib/activity.js';
+import { meters, severity, issues, sortForAttention, formatDuration, remaining, resetsBetween, leftLevel } from '/lib/attention.js';
+import { tick, totals, select, forAccount } from '/lib/activity.js';
 import { usageReport } from '/lib/cost.js';
 import { observeResets, resetWindow, resetRows } from '/lib/capacity.js';
 
@@ -32,8 +32,6 @@ const when = (ts, now) => {
 };
 const ago = (ts, now) => ts ? `${formatDuration(now - new Date(ts).getTime())} ago` : 'never';
 const providerName = p => p === 'codex' ? 'Codex' : 'Claude';
-/** Bar colour by the share of a window still unused: plenty, getting low, nearly gone. */
-const leftLevel = left => left >= 0.6 ? 'ok' : left >= 0.2 ? 'warning' : 'critical';
 
 let last = null;
 let lastGoodAt = 0;
@@ -325,14 +323,15 @@ function slotRank(m) {
   if (m.key === 'unified7d') return 2;
   return 3;
 }
-const SLOT_LABEL = { unified5h: '5-hour limit', unified7d: '7-day limit', unified7dFable: '7-day Fable 5.1' };
+const SLOT_LABEL = { unified5h: '5-hour limit', unified7d: '7-day limit', unified7dFable: '7-day Fable 5.1', 'scoped:fable': '7-day Fable 5.1' };
 const slotLabel = m => SLOT_LABEL[m.key] || `7-day ${m.label}`;
 
 /** An account's meters in display order, with placeholders for windows it never reported. */
 function meterSlots(a) {
-  const ms = meters(a).sort((p, q) => slotRank(p) - slotRank(q));
+  const ms = meters(a);
   const want = a.provider === 'codex' ? ['unified5h', 'unified7d'] : ['unified7dFable', 'unified5h', 'unified7d'];
-  for (const key of want) if (!ms.some(m => m.key === key)) ms.push({ key, label: key, placeholder: true });
+  // A slot is filled by any meter of its rank: Fable may arrive as the scoped weekly bucket instead.
+  for (const key of want) if (!ms.some(m => slotRank(m) === slotRank({ key }))) ms.push({ key, label: key, placeholder: true });
   return ms.sort((p, q) => slotRank(p) - slotRank(q));
 }
 
@@ -589,7 +588,8 @@ function renderLog(s) {
 
   renderEvents(events.filter(e => e.at >= now - range && (!who || e.account === who)).slice().reverse(), who, now);
 
-  const shown = select(ticks, { since: now - range, who }).slice().reverse();
+  // One account picked: only its share of each interval, so rows and totals are its own.
+  const shown = (who ? forAccount(ticks, who, now - range) : select(ticks, { since: now - range })).slice().reverse();
   const pollS = Math.round((s.dashboard?.pollMs || 5000) / 1000);
   $('#log-note').textContent = `What happened to each account, and what went through it. Each request row is one ${pollS}-second poll with activity in it. Prompt contents are never recorded.`;
 
@@ -599,7 +599,7 @@ function renderLog(s) {
   const allReq = Object.values(byAccount).reduce((n, t) => n + t.requests, 0);
   const allTok = Object.values(byAccount).reduce((n, t) => n + t.tokens, 0);
   $('#log-summary').replaceChildren(
-    who ? null : h('div', { class: 'tile' }, h('div', { class: 'label' }, 'All accounts'), h('div', { class: 'value' }, compact(allTok)), h('div', { class: 'sub' }, `tokens in ${compact(allReq)} requests, cache included`)),
+    ...(who ? [] : [h('div', { class: 'tile' }, h('div', { class: 'label' }, 'All accounts'), h('div', { class: 'value' }, compact(allTok)), h('div', { class: 'sub' }, `tokens in ${compact(allReq)} requests, cache included`))]),
     ...tiles,
   );
 

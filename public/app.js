@@ -1,5 +1,6 @@
 import { meters, severity, issues, sortForAttention, formatDuration, remaining, resetsBetween, leftLevel } from '/lib/attention.js';
 import { tick, totals, select, forAccount } from '/lib/activity.js';
+import { eventsFor, idOf } from '/lib/events.js';
 import { usageReport } from '/lib/cost.js';
 import { observeResets, resetWindow, resetRows } from '/lib/capacity.js';
 
@@ -580,15 +581,19 @@ function renderLog(s) {
   const now = Date.now();
   const range = Number($('#log-range').value);
   const whoSel = $('#log-account');
-  const names = (s.accounts || []).map(a => a.name).sort();
+  // Options are provider+name: a Claude and a Codex account may share an email.
+  const accounts = (s.accounts || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+  const dup = n => accounts.filter(a => a.name === n).length > 1;
   const current = whoSel.value;
-  whoSel.replaceChildren(h('option', { value: '' }, 'all accounts'), ...names.map(n => h('option', { value: n }, n)));
-  whoSel.value = names.includes(current) ? current : '';
-  const who = whoSel.value || null;
+  whoSel.replaceChildren(h('option', { value: '' }, 'all accounts'), ...accounts.map(a => h('option', { value: idOf(a) }, dup(a.name) ? `${a.name} (${providerName(a.provider)})` : a.name)));
+  whoSel.value = accounts.some(a => idOf(a) === current) ? current : '';
+  const picked = accounts.find(a => idOf(a) === whoSel.value) || null;
+  const who = picked?.name || null;
 
-  renderEvents(events.filter(e => e.at >= now - range && (!who || e.account === who)).slice().reverse(), who, now);
+  renderEvents(eventsFor(events, picked ? idOf(picked) : '', now - range), who, now);
 
   // One account picked: only its share of each interval, so rows and totals are its own.
+  // The request log is keyed by name alone, so two providers sharing an email share these rows.
   const shown = (who ? forAccount(ticks, who, now - range) : select(ticks, { since: now - range })).slice().reverse();
   const pollS = Math.round((s.dashboard?.pollMs || 5000) / 1000);
   $('#log-note').textContent = `What happened to each account, and what went through it. Each request row is one ${pollS}-second poll with activity in it. Prompt contents are never recorded.`;

@@ -295,6 +295,9 @@ input:not([type]) { min-width: 240px; }
   .nav { flex-direction: row; flex-wrap: wrap; flex-basis: 100%; order: 3; overflow: visible; gap: 2px; }
   .nav-group { display: none; }
   .nav a, .nav summary { white-space: nowrap; padding: 6px 10px; }
+  .nav .menu { position: static; }
+  /* anchored to the strip, not the item, so the menu cannot run past the viewport edge */
+  .nav .menu-list { left: 12px; right: 12px; top: auto; min-width: 0; }
   .nav .nav-count { margin-left: 4px; }
   .side-foot { flex-direction: row; border-top: 0; padding-top: 0; }
   .side-foot summary span:not(.av):not(.bell-count) { display: none; }

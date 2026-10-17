@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { diffEvents } from '../lib/events.js';
+import { diffEvents, eventsFor, idOf } from '../lib/events.js';
 
 const snap = (accounts, current = {}) => ({ accounts, currentAccounts: current });
 const acct = (name, extra = {}) => ({ name, provider: 'anthropic', status: 'active', auth: {}, ...extra });
@@ -41,6 +41,17 @@ test('a Claude and a Codex account sharing a name are tracked apart', () => {
   const out = diffEvents(both({}, { disabled: true }), both({}, {}), 100, 50);
   assert.deepEqual(out.map(e => [e.provider, e.kind, e.text]), [['codex', 'paused', 'Resumed']]);
   assert.deepEqual(diffEvents(both({}, {}), both({}, {}), 100, 50), [], 'the Claude one serving does not read as the Codex one serving');
+});
+
+test('eventsFor picks one provider+name identity, newest first', () => {
+  const list = [
+    { at: 1, account: 'me@x', provider: 'anthropic', kind: 'paused', text: 'Paused' },
+    { at: 2, account: 'me@x', provider: 'codex', kind: 'paused', text: 'Paused' },
+    { at: 3, account: 'me@x', provider: 'anthropic', kind: 'paused', text: 'Resumed' },
+  ];
+  assert.deepEqual(eventsFor(list, idOf({ name: 'me@x' })).map(e => e.at), [3, 1], 'provider defaults to anthropic');
+  assert.deepEqual(eventsFor(list, 'codex:me@x').map(e => e.at), [2]);
+  assert.deepEqual(eventsFor(list, '', 2).map(e => e.at), [3, 2], 'no id means every account');
 });
 
 test('accounts missing from the earlier snapshot are skipped', () => {

@@ -14,6 +14,8 @@ import { tick } from './lib/activity.js';
 import { observeResets, resetId } from './lib/capacity.js';
 import { hashPassword, verifyPassword, signToken, verifyToken, allowed, throttle, ROLES, NAME } from './lib/auth.js';
 import { resetsBetween } from './lib/attention.js';
+import { diffEvents } from './lib/events.js';
+import { loadLog, appendLog } from './lib/logfile.js';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
 const PORT = Number(process.env.PORT) || 8787;
@@ -77,21 +79,19 @@ async function fetchStatus() {
 
 const ACTIVITY_FILE = join(DATA_DIR, 'activity.jsonl');
 const CAPACITY_FILE = join(DATA_DIR, 'capacity.jsonl');
+const EVENTS_FILE = join(DATA_DIR, 'events.jsonl');
 const resetHistory = new Map();
 const pendingResets = new Map();
 let resetWrite = Promise.resolve();
 let latest = null, latestAt = 0, latestReadAt = 0, pollError = null, polling = null;
 /** @type {ReturnType<typeof tick>[]} */
 let ticks = [];
+/** @type {ReturnType<typeof diffEvents>} */
+let events = [];
+/** When the snapshot in `latest` was received: event diffs are timed by arrival, not by when the fetch began. */
+let latestSeenAt = 0;
 
-async function loadTicks() {
-  await mkdir(DATA_DIR, { recursive: true });
-  try {
-    const cutoff = Date.now() - RETAIN_MS;
-    ticks = (await readFile(ACTIVITY_FILE, 'utf8')).split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(t => t && t.at >= cutoff);
-    await writeFile(ACTIVITY_FILE, ticks.map(t => JSON.stringify(t)).join('\n') + (ticks.length ? '\n' : ''));
-  } catch (err) { if (err.code !== 'ENOENT') console.error(`[dashboard] could not read ${ACTIVITY_FILE}: ${err.message}`); }
-}
+async function recordEvents(rows) { events = await appendLog(EVENTS_FILE, events, rows, { retainMs: RETAIN_MS }); }
 
 async function loadResets() {
   try {
@@ -136,16 +136,15 @@ async function pollOnce() {
       else console.error(`[dashboard] quota probe after a reset failed: ${probe.json?.error || `proxy answered ${probe.status}`}`);
     }
     const t = tick(latest, next);
-    latest = next; latestAt = Date.now(); latestReadAt = readAt; pollError = null;
+    // A reset that happens while the status request is in flight is already in
+    // `next`, so the window is judged by when the snapshot arrived.
+    const seenAt = Date.now();
+    const changed = diffEvents(latest, next, seenAt, latestSeenAt);
+    latest = next; latestAt = seenAt; latestSeenAt = seenAt; latestReadAt = readAt; pollError = null;
     const resets = observeResets(resetHistory, next.accounts, latestAt);
     await saveResets(resets);
-    if (t) {
-      ticks.push(t);
-      // ponytail: the file only grows between restarts; loadTicks() compacts it on start.
-      await appendFile(ACTIVITY_FILE, JSON.stringify(t) + '\n').catch(err => console.error(`[dashboard] could not write ${ACTIVITY_FILE}: ${err.message}`));
-      const cutoff = Date.now() - RETAIN_MS;
-      if (ticks.length && ticks[0].at < cutoff) ticks = ticks.filter(x => x.at >= cutoff);
-    }
+    if (t) ticks = await appendLog(ACTIVITY_FILE, ticks, [t], { retainMs: RETAIN_MS });
+    await recordEvents(changed);
   } catch (err) {
     pollError = err;
   }
@@ -250,6 +249,7 @@ async function finishLogin(id, input) {
   }
   const reload = await proxy('POST', '/teamclaude/reload').catch(err => ({ status: 0, json: { error: err.message } }));
   latestAt = 0;
+  await recordEvents([{ at: Date.now(), account: outcome.name, provider: login.provider, kind: 'signin', text: `Signed in from the dashboard${outcome.action === 'added' ? ' (new account)' : ''}` }]);
   return { ...outcome, reloaded: reload.status === 200, reloadError: reload.status === 200 ? null : (reload.json?.error || `proxy answered ${reload.status}`) };
 }
 
@@ -310,7 +310,8 @@ async function upsertCodex(creds) {
 const CONTROL = {
   switch: b => ['/teamclaude/switch', { account: b.account }],
   disable: b => ['/teamclaude/disable', { account: b.account, disabled: !!b.disabled }],
-  probe: () => ['/teamclaude/probe', null],
+  // With an account the proxy narrows the probe to that one account (older proxies ignore the field and probe everything).
+  probe: b => ['/teamclaude/probe', b.account ? { account: b.account } : null],
   reload: () => ['/teamclaude/reload', null],
 };
 
@@ -418,7 +419,7 @@ async function accountAction(req, body) {
 }
 
 // Reachable without signing in: the sign-in page and what it needs.
-const OPEN = new Set(['/login', '/login.js', '/style.css', '/theme.js', '/favicon.svg', '/api/session']);
+const OPEN = new Set(['/login', '/login.js', '/style.css', '/favicon.svg', '/api/session']);
 const isOpen = pathname => OPEN.has(pathname) || pathname.startsWith('/lib/') || (pathname === '/api/accounts' && !users.length);
 
 // ── http ────────────────────────────────────────────────────────────────────
@@ -490,6 +491,10 @@ async function handle(req, res) {
       const since = Number(url.searchParams.get('since')) || 0;
       return send(res, 200, { ticks: ticks.filter(t => t.at >= since), pollMs: POLL_MS, retainMs: RETAIN_MS });
     }
+    if (req.method === 'GET' && pathname === '/api/events') {
+      const since = Number(url.searchParams.get('since')) || 0;
+      return send(res, 200, { events: events.filter(e => e.at >= since), retainMs: RETAIN_MS });
+    }
     if (req.method === 'POST' && pathname === '/api/control') {
       const body = await readAuthorizedBody(req, pathname);
       const make = CONTROL[body.action];
@@ -520,7 +525,8 @@ async function handle(req, res) {
   }
 }
 
-await loadTicks();
+ticks = await loadLog(ACTIVITY_FILE, { retainMs: RETAIN_MS });
+events = await loadLog(EVENTS_FILE, { retainMs: RETAIN_MS });
 await loadResets();
 await loadUsers();
 poll();

@@ -3,88 +3,85 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="dark">
 <title>Team Claude</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<script src="/theme.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
-<header class="top">
-  <div>
-    <h1>Team Claude</h1>
-    <p id="proxy-line" class="muted">Connecting to the proxy…</p>
+<div class="shell">
+<aside class="side">
+  <div class="brand">
+    <img src="/favicon.svg" alt="" width="28" height="28">
+    <div><b>Team Claude</b><span id="proxy-line">Connecting to the proxy…</span></div>
   </div>
-  <nav class="tabs" aria-label="Pages">
-    <a href="#overview" data-tab="overview">Overview</a>
-    <a href="#capacity" data-tab="capacity">Capacity</a>
-    <a href="#logs" data-tab="logs">Logs &amp; users</a>
-  </nav>
-  <div class="top-actions">
-    <button type="button" class="btn" id="theme-btn" title="Switch between system, light and dark">Theme: system</button>
+  <nav class="nav" aria-label="Pages">
+    <div class="nav-group">Operate</div>
+    <a href="#overview" data-tab="overview"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z"/></svg>Dashboard</a>
+    <div class="nav-group">Accounts</div>
+    <a href="#quota" data-tab="quota"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2a6 6 0 0 0-6 6 6 6 0 0 0 1.8 4.2l1.4-1.4A4 4 0 0 1 4 8a4 4 0 1 1 6.8 2.8l1.4 1.4A6 6 0 0 0 8 2zm0 4.5L6.5 10a1.5 1.5 0 1 0 3 0z"/></svg>Quota<span class="nav-count" id="nav-count" hidden></span></a>
     <details class="menu" id="add-menu">
-      <summary class="btn">Add account</summary>
+      <summary><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M7 2h2v5h5v2H9v5H7V9H2V7h5z"/></svg>Add account</summary>
       <div class="menu-list">
         <button type="button" data-signin="anthropic">Claude account</button>
         <button type="button" data-signin="codex">Codex account</button>
       </div>
     </details>
-    <button type="button" class="btn" id="probe-btn" title="Ask the proxy to re-read every account's quota now">Refresh quotas</button>
-    <details class="menu" id="me" hidden>
-      <summary class="btn me-btn"><span class="av av-sm" id="me-av" aria-hidden="true"></span><span id="me-name"></span></summary>
-      <div class="menu-list me-list" id="me-list"></div>
-    </details>
-    <details class="menu" id="bell">
-      <summary class="btn bell-btn" aria-label="Account alerts">
-        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 3a6 6 0 0 0-6 6v3.6L4.3 15.4A1 1 0 0 0 5.2 17h13.6a1 1 0 0 0 .9-1.6L18 12.6V9a6 6 0 0 0-6-6Zm-2.2 15.5a2.3 2.3 0 0 0 4.4 0Z" fill="currentColor"/></svg>
+    <div class="nav-group">Observe</div>
+    <a href="#capacity" data-tab="capacity"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13zm0 1.6a4.9 4.9 0 1 1 0 9.8 4.9 4.9 0 0 1 0-9.8zM7.2 4h1.6v3.7l2.6 1.6-.8 1.3-3.4-2.1z"/></svg>Capacity</a>
+    <a href="#logs" data-tab="logs"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 3h12v2H2zm0 4h12v2H2zm0 4h8v2H2z"/></svg>Logs</a>
+    <div class="nav-group">Control</div>
+    <a href="#users" data-tab="users"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2a3 3 0 1 1 0 6 3 3 0 0 1 0-6zm5 1a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5zM6 9c2.8 0 5 1.4 5 3.2V14H1v-1.8C1 10.4 3.2 9 6 9zm5 0c2.3 0 4 1.2 4 2.8V14h-3v-1.8c0-1-.4-1.9-1.2-2.6.1-.4.2-.6.2-.6z"/></svg>Users</a>
+  </nav>
+  <div class="side-foot">
+    <details class="menu up" id="bell">
+      <summary class="bell-btn" aria-label="Account alerts">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 3a6 6 0 0 0-6 6v3.6L4.3 15.4A1 1 0 0 0 5.2 17h13.6a1 1 0 0 0 .9-1.6L18 12.6V9a6 6 0 0 0-6-6Zm-2.2 15.5a2.3 2.3 0 0 0 4.4 0Z" fill="currentColor"/></svg>
+        <span>Alerts</span>
         <span class="bell-count" id="bell-count" hidden></span>
       </summary>
       <div class="menu-list bell-list" id="bell-list"></div>
     </details>
     <span class="sr-only" id="bell-live" aria-live="polite"></span>
+    <details class="menu up" id="me" hidden>
+      <summary class="me-btn"><span class="av av-sm" id="me-av" aria-hidden="true"></span><span id="me-name"></span></summary>
+      <div class="menu-list me-list" id="me-list"></div>
+    </details>
   </div>
-</header>
-
-<div id="banner" class="banner" hidden></div>
+</aside>
 
 <main>
+<div id="banner" class="banner" hidden></div>
+
   <div data-page="overview">
-    <div class="top-row">
-      <section class="left">
-        <div class="section-head">
-          <h2>Subscription usage left</h2>
-          <p class="muted">Unused quota pooled across active accounts. 100% means every account's window is untouched.</p>
+    <div class="page-head"><h2>Dashboard</h2><p class="muted">Unused quota pooled across active accounts, and what the proxy's traffic would cost at API list prices.</p></div>
+    <section class="left">
+      <div id="left-groups"></div>
+    </section>
+    <section class="cost">
+      <div class="section-head">
+        <h2>API cost estimate</h2>
+        <div class="seg" id="cost-range" role="group" aria-label="Time range">
+          <button type="button" data-range="86400000" aria-pressed="true">Past 24 h</button>
+          <button type="button" data-range="604800000" aria-pressed="false">7 days</button>
+          <button type="button" data-range="all" aria-pressed="false">All time</button>
         </div>
-        <div id="left-groups"></div>
-      </section>
-      <section class="cost">
-        <div class="section-head">
-          <h2>API cost estimate</h2>
-          <div class="seg" id="cost-range" role="group" aria-label="Time range">
-            <button type="button" data-range="86400000" aria-pressed="true">Past 24 h</button>
-            <button type="button" data-range="604800000" aria-pressed="false">7 days</button>
-            <button type="button" data-range="all" aria-pressed="false">All time</button>
-          </div>
+      </div>
+      <div class="cost-top">
+        <div class="tile">
+          <div class="hero" id="cost-hero">—</div>
+          <p class="muted" id="cost-sub"></p>
         </div>
-        <div class="cost-top">
-          <div>
-            <div class="hero" id="cost-hero">—</div>
-            <p class="muted" id="cost-sub"></p>
-          </div>
-          <div>
-            <h3 id="cost-chart-title">Hourly cost</h3>
-            <div id="cost-chart"></div>
-          </div>
+        <div class="tile">
+          <h3 id="cost-chart-title">Hourly cost</h3>
+          <div id="cost-chart"></div>
         </div>
-        <div class="kpis" id="cost-totals"></div>
-      </section>
-    </div>
-
-    <section id="ledger"></section>
-
+      </div>
+      <div class="kpis" id="cost-totals"></div>
+    </section>
     <section class="cost-breakdown">
       <div class="section-head">
         <h2>API cost breakdown</h2>
@@ -93,9 +90,17 @@
           <button type="button" data-by="model" aria-pressed="false">Model</button>
         </div>
       </div>
-      <p class="muted">What the proxy's traffic would cost at Anthropic and OpenAI API list prices. The proxy counts tokens per account and quota bucket, not per model, so Fable bucket traffic is priced as Fable 5.1 and the rest as Opus 5.5. Codex is shown as a range, between the cheapest and dearest model each account used. With the per-model patch in docs/upstream/ applied to Team Claude, every model is priced exactly.</p>
+      <p class="muted">The proxy counts tokens per account and quota bucket, not per model, so Fable bucket traffic is priced as Fable 5.1 and the rest as Opus 5.5. Codex is shown as a range, between the cheapest and dearest model each account used.</p>
       <div id="cost-table"></div>
     </section>
+  </div>
+
+  <div data-page="quota" hidden>
+    <div class="page-head">
+      <div><h2>Quota</h2><p class="muted">What is left in each account's windows. Bars show the share still unused.</p></div>
+      <button type="button" class="btn" id="probe-btn" title="Ask the proxy to re-read every account's quota now">Refresh quotas</button>
+    </div>
+    <section id="ledger"></section>
   </div>
 
   <div data-page="capacity" hidden>
@@ -112,37 +117,42 @@
       </div>
       <p class="muted">Each mark is a reported reset time. Filled marks are weekly windows, hollow marks are 5-hour sessions. Hover or focus a mark for its usage.</p>
       <p class="muted" id="capacity-note" aria-live="polite"></p>
-      <div id="tide-chart"></div>
+      <div class="tile" id="tide-chart"></div>
     </section>
   </div>
 
   <div data-page="logs" hidden>
-    <section class="log">
-      <div class="section-head">
-        <h2>Request log</h2>
-        <div class="row">
-          <label class="muted">Last
-            <select id="log-range">
-              <option value="3600000">hour</option>
-              <option value="21600000">6 hours</option>
-              <option value="86400000" selected>24 hours</option>
-              <option value="604800000">7 days</option>
-            </select>
-          </label>
-          <label class="muted">Show
-            <select id="log-who"><option value="">everything</option></select>
-          </label>
-        </div>
+    <div class="page-head">
+      <div><h2>Logs</h2><p class="muted" id="log-note"></p></div>
+      <div class="row">
+        <label class="muted">Account
+          <select id="log-account"><option value="">all accounts</option></select>
+        </label>
+        <label class="muted">Last
+          <select id="log-range">
+            <option value="3600000">hour</option>
+            <option value="21600000">6 hours</option>
+            <option value="86400000" selected>24 hours</option>
+            <option value="604800000">7 days</option>
+          </select>
+        </label>
       </div>
-      <p class="muted" id="log-note"></p>
+    </div>
+    <section class="events">
+      <div class="section-head"><h3>Account events</h3><p class="muted">Changes the dashboard noticed between polls: serving, pauses, errors, blocks, token refreshes, window resets and sign-ins.</p></div>
+      <div id="events-table"></div>
+    </section>
+    <section class="log">
+      <div class="section-head"><h3>Requests</h3></div>
       <div id="log-summary" class="tiles"></div>
       <div id="log-table"></div>
     </section>
+  </div>
 
+  <div data-page="users" hidden>
     <section class="users">
-      <div class="section-head">
-        <h2>Users</h2>
-        <p class="muted">Each user gets their own proxy key, so requests and tokens are booked to them. Team Claude attributes usage per user but does not limit it.</p>
+      <div class="page-head">
+        <div><h2>Users</h2><p class="muted">Each user gets their own proxy key, so requests and tokens are booked to them. Team Claude attributes usage per user but does not limit it.</p></div>
       </div>
       <div id="users-table"></div>
       <form id="user-add" class="row">
@@ -174,9 +184,10 @@
       <p id="signin-note" class="result" aria-live="polite"></p>
     </section>
   </div>
-</main>
 
 <footer class="muted" id="foot"></footer>
+</main>
+</div>
 
 <dialog id="signin">
   <form method="dialog" id="signin-form">

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { tick, totals, select } from '../lib/activity.js';
+import { tick, totals, select, forAccount } from '../lib/activity.js';
 
 const snap = (req, cacheRead, clients = {}) => ({
   accounts: [{ name: 'a@x', usage: { totalRequests: req, totalInputTokens: 10, totalOutputTokens: 5, totalCacheReadTokens: cacheRead, totalCacheCreationTokens: 0 } }],
@@ -64,4 +64,27 @@ test('names matching object prototype properties are kept and matched exactly', 
   assert.equal(totals([t], 'clients').__proto__.requests, 1);
   assert.equal(Object.hasOwn(Object, 'requests'), false);
   assert.equal(select([{ at: 1, accounts: { 'a@x': {} }, clients: {} }], { who: 'toString' }).length, 0);
+});
+
+test('forAccount keeps only the intervals and shares of that account', () => {
+  const ticks = [
+    { at: 1, accounts: { a: { requests: 1, tokens: 10 }, b: { requests: 2, tokens: 20 } }, clients: { a: { requests: 3 } } },
+    { at: 2, accounts: { b: { requests: 1, tokens: 5 } }, clients: {} },
+    { at: 3, accounts: { a: { requests: 1, tokens: 7 } }, clients: {} },
+  ];
+  const out = forAccount(ticks, 'a', 2);
+  assert.deepEqual(out, [{ at: 3, accounts: { a: { requests: 1, tokens: 7 } }, clients: {} }]);
+  const all = forAccount(ticks, 'a');
+  assert.deepEqual(Object.keys(all[0].accounts), ['a'], "b's share is dropped from a shared interval");
+  assert.deepEqual(totals(all, 'accounts'), { a: { requests: 2, tokens: 17, lastAt: 3 } });
+  assert.deepEqual(forAccount(ticks, 'nobody'), []);
+});
+
+test('forAccount tells a Codex account from a Claude one sharing its name', () => {
+  const ticks = [
+    { at: 1, accounts: { 'me@x': { requests: 1, tokens: 10, provider: 'codex' } }, clients: {} },
+    { at: 2, accounts: { 'me@x': { requests: 1, tokens: 20 } }, clients: {} },
+  ];
+  assert.deepEqual(forAccount(ticks, 'me@x', 0, 'anthropic').map(t => t.at), [2], 'Claude skips the Codex-marked interval');
+  assert.deepEqual(forAccount(ticks, 'me@x', 0, 'codex').map(t => t.at), [1, 2], 'Codex also keeps legacy rows that carry no mark');
 });

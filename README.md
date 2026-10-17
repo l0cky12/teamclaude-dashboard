@@ -6,12 +6,12 @@ multi-account proxy. It shows, for every pooled Claude and Codex account:
 - which accounts need a human (errors, rejected credentials, expired sign-ins, near-limit windows), listed first with a one-click fix;
 - a timeline of when each quota window resets, so you can see the order capacity comes back;
 - Capacity ranges for upcoming resets, past 24 hours, past 7 days, past 30 days, and all recorded resets;
-- per-window meters (5-hour session, weekly, per-model) with reset countdowns and staleness; in the last minute before a window resets the page refreshes every 2 seconds, and once it resets the dashboard asks the proxy to read the new figure right away (a zero-spend usage check) instead of waiting for that account's next request;
+- per-window meters showing what is left, in the order Fable 5.1, 5-hour session, weekly, then any other model bucket, with reset countdowns and staleness; in the last minute before a window resets the page refreshes every 2 seconds, and once it resets the dashboard asks the proxy to read the new figure right away (a zero-spend usage check) instead of waiting for that account's next request;
 - request and token usage, active sessions, and the proxy's routing share;
 - sign-in for Claude and Codex accounts from the browser, no terminal needed;
 - users: give each person their own proxy key and see their requests and tokens (all time, last 24 h, last 5 h);
-- a request log: what finished in each polling interval, by user and by account, with no prompt contents stored;
-- light, dark, or system theme;
+- a Logs page per account: an event history (serving, pauses, errors, blocks, token refreshes, window resets, sign-ins) and a request log of what finished in each polling interval, with no prompt contents stored;
+- one dark console theme with a sidebar: Dashboard, Quota, Add account, Capacity, Logs, Users;
 - sign-in with your own dashboard account and role (admin, operator, viewer);
   a device remembers several accounts, so switching is one click.
 
@@ -43,7 +43,7 @@ goes to the data directory, which the compose file also mounts.
 | `TEAMCLAUDE_URL` | `http://127.0.0.1:3456` | Where the proxy listens |
 | `TEAMCLAUDE_CONFIG_DIR` | `~/.config` | Directory containing `teamclaude.json` |
 | `TEAMCLAUDE_API_KEY` | from config | Override the proxy key if the config is not mounted |
-| `DASHBOARD_DATA_DIR` | `./data` | Where the request log (`activity.jsonl`) is kept |
+| `DASHBOARD_DATA_DIR` | `./data` | Where the request log (`activity.jsonl`) and account events (`events.jsonl`) are kept |
 | `POLL_MS` | `5000` | How often the proxy is polled for the request log |
 
 If the proxy runs on another machine, point `TEAMCLAUDE_URL` at it and mount a
@@ -92,7 +92,11 @@ enforce per-user limits, and the dashboard does not pretend otherwise.
 The request log is derived: the dashboard polls the proxy every 5 seconds and
 records what the cumulative counters did between polls, per account and per
 user. One row is one interval with activity. Rows are kept for 7 days in
-`activity.jsonl` under the data directory. Nothing about prompt or response
+`activity.jsonl` under the data directory. Account events are derived the
+same way: each poll is compared with the last, and every change (serving,
+paused, error, blocked, token due, window reset) becomes one line in
+`events.jsonl`, kept 7 days; sign-ins finished from the dashboard are logged
+there too. Nothing about prompt or response
 content is recorded. If you need full request bodies for debugging, Team
 Claude's own `logDir` setting writes one file per request; see its
 configuration docs.

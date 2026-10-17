@@ -32,6 +32,8 @@ const when = (ts, now) => {
 };
 const ago = (ts, now) => ts ? `${formatDuration(now - new Date(ts).getTime())} ago` : 'never';
 const providerName = p => p === 'codex' ? 'Codex' : 'Claude';
+/** Bar colour by the share of a window still unused: plenty, getting low, nearly gone. */
+const leftLevel = left => left >= 0.6 ? 'ok' : left >= 0.2 ? 'warning' : 'critical';
 
 let last = null;
 let lastGoodAt = 0;
@@ -159,10 +161,12 @@ function render(s) {
   const current = new Set(Object.values(s.currentAccounts || {}));
 
   const up = s.server?.uptimeSeconds != null ? formatDuration(s.server.uptimeSeconds * 1000) : null;
-  $('#proxy-line').textContent = `Proxy ${s.server?.version || ''}, up ${up || '—'}. ${accounts.length} accounts, switching at ${pct(threshold)}.` + (s.server?.updateAvailable ? ' An update is available.' : '');
+  $('#proxy-line').textContent = `Proxy ${s.server?.version || ''} · up ${up || '—'} · switches at ${pct(threshold)}` + (s.server?.updateAvailable ? ' · update available' : '');
+  $('#nav-count').hidden = !accounts.length;
+  $('#nav-count').textContent = accounts.length;
 
   renderBell(accounts, { now, threshold });
-  renderLeft(accounts, now, threshold);
+  renderLeft(accounts, now);
   renderTide(accounts, now, threshold);
   renderUsers(s, now);
   renderLog(s);
@@ -173,13 +177,12 @@ function render(s) {
   for (const provider of ['anthropic', 'codex']) {
     const list = sortForAttention(accounts.filter(a => (a.provider || 'anthropic') === provider), { now, threshold });
     if (!list.length) continue;
-    const cols = provider === 'codex' ? 2 : 3;
-    const head = provider === 'codex' ? ['Session', 'Weekly'] : ['Session', 'Weekly', 'Per model'];
+    // Claude rows: Fable, session, weekly, then any other model bucket. Codex rows: session, weekly.
+    const cols = Math.max(...list.map(a => meterSlots(a).length), provider === 'codex' ? 2 : 3);
     ledger.append(h('section', { class: 'group' },
-      h('h2', {}, `${providerName(provider)} accounts (${list.length})`),
+      h('h2', {}, providerName(provider), h('span', { class: 'n' }, list.length)),
       h('div', { class: 'ledger', style: `--cols:${cols}` },
-        h('div', { class: 'lrow head' }, h('div', {}, 'Account'), ...head.map(t => h('div', {}, t)), h('div', {}, 'Usage'), h('div', {}, '')),
-        ...list.map(a => renderRow(a, { now, threshold, cols, serving: current.has(a.name), adaptive: (s.adaptive || []).find(x => x.name === a.name) })),
+        ...list.map(a => renderRow(a, { now, cols, serving: current.has(a.name), adaptive: (s.adaptive || []).find(x => x.name === a.name) })),
       )));
   }
   if (!accounts.length) ledger.append(h('p', { class: 'muted' }, 'No accounts yet. Add a Claude or Codex account to start.'));
@@ -216,13 +219,13 @@ function renderBell(accounts, opts) {
   }
 }
 
-function renderLeft(accounts, now, threshold) {
-  const groups = ['anthropic', 'codex'].map(provider => ({ provider, windows: remaining(accounts, provider, now) })).filter(g => g.windows.length);
+function renderLeft(accounts, now) {
+  const groups = ['anthropic', 'codex'].map(provider => ({ provider, windows: remaining(accounts, provider, now).sort((a, b) => slotRank(a) - slotRank(b)) })).filter(g => g.windows.length);
   $('#left-groups').replaceChildren(...(groups.length ? groups.map(({ provider, windows }) => h('div', { class: 'left-group', style: `--n:${windows.length}` },
     h('h3', {}, `${providerName(provider)} subscriptions`),
     h('div', { class: 'left-tiles' }, ...windows.map(w => {
       const share = w.left / w.count;
-      const sev = severity(1 - share, threshold);
+      const sev = leftLevel(share);
       const title = w.accounts.map(a => `${a.name}: ${pct(a.left)} left${a.resetAt > now ? `, resets in ${formatDuration(a.resetAt - now)}` : ''}`).join('\n');
       return h('div', { class: 'left-tile', title },
         h('div', { class: 'line' }, h('span', { class: 'label' }, w.label), h('span', { class: 'muted' }, w.hint)),
@@ -315,11 +318,26 @@ function renderTide(accounts, now, threshold) {
   if (focused != null) [...root.querySelectorAll('[data-reset]')].find(e => e.dataset.reset === focused)?.focus({ preventScroll: true });
 }
 
-function renderRow(a, { now, threshold, cols, serving, adaptive }) {
-  const ms = meters(a);
-  const byKey = k => ms.find(m => m.key === k);
-  const scoped = ms.filter(m => !['unified5h', 'unified7d'].includes(m.key));
-  const slots = cols === 2 ? [byKey('unified5h'), byKey('unified7d')] : [byKey('unified5h'), byKey('unified7d'), scoped];
+/** Meter order: the Fable bucket first, then the 5-hour session, the weekly window, then other model buckets. */
+function slotRank(m) {
+  if (m.key === 'unified7dFable' || m.key === 'scoped:fable') return 0;
+  if (m.key === 'unified5h') return 1;
+  if (m.key === 'unified7d') return 2;
+  return 3;
+}
+const SLOT_LABEL = { unified5h: '5-hour limit', unified7d: '7-day limit', unified7dFable: '7-day Fable 5.1' };
+const slotLabel = m => SLOT_LABEL[m.key] || `7-day ${m.label}`;
+
+/** An account's meters in display order, with placeholders for windows it never reported. */
+function meterSlots(a) {
+  const ms = meters(a).sort((p, q) => slotRank(p) - slotRank(q));
+  const want = a.provider === 'codex' ? ['unified5h', 'unified7d'] : ['unified7dFable', 'unified5h', 'unified7d'];
+  for (const key of want) if (!ms.some(m => m.key === key)) ms.push({ key, label: key, placeholder: true });
+  return ms.sort((p, q) => slotRank(p) - slotRank(q));
+}
+
+function renderRow(a, { now, cols, serving, adaptive }) {
+  const slots = meterSlots(a);
   const auth = a.auth || {};
 
   const badges = [];
@@ -336,25 +354,36 @@ function renderRow(a, { now, threshold, cols, serving, adaptive }) {
 
   const u = a.usage || {};
   const tokens = (u.totalInputTokens || 0) + (u.totalOutputTokens || 0) + (u.totalCacheReadTokens || 0) + (u.totalCacheCreationTokens || 0);
+  const use = [
+    `${compact(u.totalRequests || 0)} requests`,
+    `${compact(tokens)} tokens`,
+    `last used ${ago(u.lastUsed, now)}`,
+    a.sessions ? `${a.sessions} active session${a.sessions === 1 ? '' : 's'}` : null,
+    adaptive?.weight != null ? `share ${pct(adaptive.weight)}` : null,
+  ].filter(Boolean).join(' · ');
+  const needsSignin = attentionNeedsSignin(a, now);
 
   return h('div', { class: `lrow${a.disabled ? ' disabled' : ''}` },
-    h('div', { class: 'who' }, h('div', { class: 'name' }, a.name), h('div', { class: 'sub' }, sub), h('div', { class: 'badges' }, badges)),
-    ...slots.map((m, i) => Array.isArray(m)
-      ? (m.length ? h('div', {}, ...m.map(x => renderMeter(x, now, threshold, x.label))) : h('div', { class: 'meter none' }, 'Per model: not metered separately'))
-      : renderMeter(m, now, threshold, i === 0 ? 'Session' : 'Weekly')),
-    h('div', { class: 'usage' },
-      h('div', {}, h('strong', {}, compact(u.totalRequests || 0)), ' requests'),
-      h('div', {}, h('strong', {}, compact(tokens)), ' tokens'),
-      h('div', {}, `last used ${ago(u.lastUsed, now)}`),
-      a.sessions ? h('div', {}, `${a.sessions} active session${a.sessions === 1 ? '' : 's'}`) : null,
-      adaptive?.weight != null ? h('div', {}, `routing share ${pct(adaptive.weight)}`) : null,
-    ),
+    h('div', { class: 'who' }, h('div', { class: 'name' }, a.name), h('div', { class: 'sub' }, sub), h('div', { class: 'use' }, use), h('div', { class: 'badges' }, badges)),
+    ...slots.map(m => renderMeter(m, now)),
+    ...Array.from({ length: cols - slots.length }, () => h('div')),
     h('div', { class: 'actions' },
-      h('button', { class: 'btn small', type: 'button', disabled: a.disabled || serving, onclick: () => control({ action: 'switch', account: a.name }) }, 'Use now'),
-      h('button', { class: 'btn small', type: 'button', onclick: () => control({ action: 'disable', account: a.name, disabled: !a.disabled }) }, a.disabled ? 'Resume' : 'Pause'),
-      h('button', { class: 'btn small', type: 'button', onclick: () => openSignin(a.provider || 'anthropic', a.name) }, 'Sign in again'),
+      needsSignin ? h('button', { class: 'act warn', type: 'button', onclick: () => openSignin(a.provider || 'anthropic', a.name) }, 'Sign in again') : null,
+      h('button', { class: 'act', type: 'button', disabled: a.disabled || serving, onclick: () => control({ action: 'switch', account: a.name }) }, 'Use now'),
+      h('button', { class: 'act', type: 'button', onclick: () => control({ action: 'disable', account: a.name, disabled: !a.disabled }) }, a.disabled ? 'Resume' : 'Pause'),
+      h('button', { class: 'act', type: 'button', onclick: () => probeOne(a.name) }, 'Refresh quota'),
     ),
   );
+}
+
+/** Whether the row should offer a sign-in: an error, rejected credentials, or an expired sign-in. */
+function attentionNeedsSignin(a, now) {
+  const auth = a.auth || {};
+  return a.status === 'error' || a.unavailable === 'error' || a.unavailable === 'credential' || !!a.credentialRejectedUntil || (auth.expiresAt && auth.expiresAt < now && !auth.hasRefreshToken);
+}
+
+async function probeOne(name) {
+  await control({ action: 'probe', account: name });
 }
 
 function tier(auth) {
@@ -366,14 +395,21 @@ function tier(auth) {
   return null;
 }
 
-function renderMeter(m, now, threshold, label) {
-  if (!m) return h('div', { class: 'meter none' }, `${label}: no data yet`);
-  const sev = severity(m.utilization, threshold);
-  const reset = m.resetAt && m.resetAt > now ? `resets in ${formatDuration(m.resetAt - now)}, ${when(m.resetAt, now)}` : m.resetAt ? 'reset time passed, awaiting update' : 'no reset time';
-  const stale = m.seenAt && now - m.seenAt > 6 * 3600e3 ? h('span', { class: 'stale' }, `, seen ${ago(m.seenAt, now)}`) : null;
-  return h('div', { class: 'meter', title: m.hint },
-    h('div', { class: 'line' }, h('span', { class: `pct ${sev}` }, pct(m.utilization)), h('span', { class: 'muted' }, label || m.label)),
-    h('div', { class: 'track' }, h('div', { class: `fill ${sev}`, style: `width:${Math.min(100, m.utilization * 100)}%` }), h('div', { class: 'tick', style: `left:${threshold * 100}%`, title: `switches at ${pct(threshold)}` })),
+function renderMeter(m, now) {
+  const label = slotLabel(m);
+  if (m.placeholder) {
+    return h('div', { class: 'meter none' },
+      h('div', { class: 'line' }, h('span', { class: 'label' }, label), h('span', { class: 'pct' }, '—')),
+      h('div', { class: 'track' }, h('div', { class: 'fill' })),
+      h('div', { class: 'reset' }, 'No data yet'));
+  }
+  const left = Math.max(0, Math.min(1, 1 - m.utilization));
+  const sev = leftLevel(left);
+  const reset = m.resetAt && m.resetAt > now ? `in ${formatDuration(m.resetAt - now)} · ${when(m.resetAt, now)}` : m.resetAt ? 'Reset time passed, awaiting update' : 'No reset pending';
+  const stale = m.seenAt && now - m.seenAt > 6 * 3600e3 ? h('span', { class: 'stale' }, ` · seen ${ago(m.seenAt, now)}`) : null;
+  return h('div', { class: 'meter', title: `${m.hint}: ${pct(m.utilization)} used` },
+    h('div', { class: 'line' }, h('span', { class: 'label' }, label), h('span', { class: `pct ${sev}` }, pct(left))),
+    h('div', { class: 'track' }, h('div', { class: `fill ${sev}`, style: `width:${left * 100}%` })),
     h('div', { class: 'reset' }, reset, stale),
   );
 }
@@ -452,19 +488,6 @@ $('#probe-btn').addEventListener('click', async () => {
 });
 document.addEventListener('click', e => { for (const m of document.querySelectorAll('details.menu')) if (!m.contains(e.target)) m.open = false; });
 
-// ── theme ───────────────────────────────────────────────────────────────────
-const THEMES = ['system', 'light', 'dark'];
-function applyTheme(t) {
-  if (t === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
-  try { t === 'system' ? localStorage.removeItem('theme') : localStorage.setItem('theme', t); } catch { /* ignore */ }
-  $('#theme-btn').textContent = `Theme: ${t}`;
-}
-$('#theme-btn').addEventListener('click', () => {
-  const cur = document.documentElement.dataset.theme || 'system';
-  applyTheme(THEMES[(THEMES.indexOf(cur) + 1) % THEMES.length]);
-});
-$('#theme-btn').textContent = `Theme: ${document.documentElement.dataset.theme || 'system'}`;
-
 // ── users (proxy client keys) ───────────────────────────────────────────────
 function renderUsers(s, now) {
   const root = $('#users-table');
@@ -527,38 +550,56 @@ $('#user-key-copy').addEventListener('click', async e => {
   try { await navigator.clipboard.writeText(key); e.currentTarget.textContent = 'Copied'; setTimeout(() => { e.currentTarget.textContent = 'Copy key'; }, 1500); } catch { prompt('Copy this key', key); }
 });
 
-// ── request log ─────────────────────────────────────────────────────────────
+// ── logs: account events and the request log ────────────────────────────────
 let ticks = [];
-let ticksAt = 0;
+let events = [];
 
 async function loadActivity() {
   try {
-    const r = await api('/api/activity');
-    ticks = r.ticks || []; ticksAt = Date.now();
+    const [a, e] = await Promise.all([api('/api/activity'), api('/api/events')]);
+    ticks = a.ticks || []; events = e.events || [];
   } catch { /* keep what we have; the banner already reports proxy problems */ }
+}
+
+const EVENT_LEVEL = { error: 'critical', blocked: 'warning', token: 'warning', paused: 'warning', serving: 'good', resumed: 'good', reset: 'good', signin: 'good' };
+
+function renderEvents(shown, who, now) {
+  const rows = shown.slice(0, 200).map(e => h('div', { class: 'erow' },
+    h('div', { class: 'time' }, new Date(e.at).toLocaleString(undefined, now - e.at > 86400e3 ? { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' } : { hour: 'numeric', minute: '2-digit', second: '2-digit' })),
+    h('span', { class: `dot ${e.text.startsWith('Error cleared') || e.text.startsWith('No longer') || e.text === 'Resumed' ? 'good' : EVENT_LEVEL[e.kind] || 'good'}` }),
+    h('div', { class: 'name' }, who ? providerName(e.provider) : e.account),
+    h('div', {}, e.text),
+  ));
+  $('#events-table').replaceChildren(h('div', { class: 'ledger' },
+    h('div', { class: 'erow head' }, h('div', {}, 'Time'), h('div'), h('div', {}, who ? 'Provider' : 'Account'), h('div', {}, 'Event')),
+    ...(rows.length ? rows : [h('div', { class: 'empty-note' }, events.length ? 'Nothing in this range.' : 'Events appear as the dashboard notices accounts change.')]),
+  ));
+  if (shown.length > 200) $('#events-table').append(h('p', { class: 'muted' }, `Showing the latest 200 of ${shown.length} events. Narrow the range or pick an account.`));
 }
 
 function renderLog(s) {
   const now = Date.now();
   const range = Number($('#log-range').value);
-  const whoSel = $('#log-who');
-  const names = [...new Set([...(s.users || []).map(u => u.name), ...Object.keys(s.clients || {}), ...(s.accounts || []).map(a => a.name)])];
+  const whoSel = $('#log-account');
+  const names = (s.accounts || []).map(a => a.name).sort();
   const current = whoSel.value;
-  whoSel.replaceChildren(h('option', { value: '' }, 'everything'), ...names.map(n => h('option', { value: n }, n)));
+  whoSel.replaceChildren(h('option', { value: '' }, 'all accounts'), ...names.map(n => h('option', { value: n }, n)));
   whoSel.value = names.includes(current) ? current : '';
+  const who = whoSel.value || null;
 
-  const shown = select(ticks, { since: now - range, who: whoSel.value || null }).slice().reverse();
+  renderEvents(events.filter(e => e.at >= now - range && (!who || e.account === who)).slice().reverse(), who, now);
+
+  const shown = select(ticks, { since: now - range, who }).slice().reverse();
   const pollS = Math.round((s.dashboard?.pollMs || 5000) / 1000);
-  $('#log-note').textContent = `Each row is one ${pollS}-second poll of the proxy with activity in it: how many requests finished and how many tokens they used, by user and by account. Prompt contents are never recorded.`;
+  $('#log-note').textContent = `What happened to each account, and what went through it. Each request row is one ${pollS}-second poll with activity in it. Prompt contents are never recorded.`;
 
-  const byUser = totals(shown, 'clients');
   const byAccount = totals(shown, 'accounts');
-  const tiles = Object.entries(byUser).sort((a, b) => b[1].tokens - a[1].tokens).map(([name, t]) =>
+  const tiles = Object.entries(byAccount).sort((a, b) => b[1].tokens - a[1].tokens).map(([name, t]) =>
     h('div', { class: 'tile' }, h('div', { class: 'label' }, name), h('div', { class: 'value' }, compact(t.tokens)), h('div', { class: 'sub' }, `tokens in ${compact(t.requests)} requests`)));
   const allReq = Object.values(byAccount).reduce((n, t) => n + t.requests, 0);
   const allTok = Object.values(byAccount).reduce((n, t) => n + t.tokens, 0);
   $('#log-summary').replaceChildren(
-    h('div', { class: 'tile' }, h('div', { class: 'label' }, 'All accounts'), h('div', { class: 'value' }, compact(allTok)), h('div', { class: 'sub' }, `tokens in ${compact(allReq)} requests, cache included`)),
+    who ? null : h('div', { class: 'tile' }, h('div', { class: 'label' }, 'All accounts'), h('div', { class: 'value' }, compact(allTok)), h('div', { class: 'sub' }, `tokens in ${compact(allReq)} requests, cache included`)),
     ...tiles,
   );
 
@@ -576,10 +617,10 @@ function renderLog(s) {
     h('div', { class: 'trow head' }, h('div', {}, 'Time'), h('div', {}, 'User'), h('div', {}, 'Account'), h('div', { class: 'num' }, 'Tokens')),
     ...(rows.length ? rows : [h('div', { class: 'empty-note' }, ticks.length ? 'Nothing in this range.' : 'The log fills in as requests go through the proxy.')]),
   ));
-  if (shown.length > 200) $('#log-table').append(h('p', { class: 'muted' }, `Showing the latest 200 of ${shown.length} rows. Narrow the range or pick a user.`));
+  if (shown.length > 200) $('#log-table').append(h('p', { class: 'muted' }, `Showing the latest 200 of ${shown.length} rows. Narrow the range or pick an account.`));
 }
 $('#log-range').addEventListener('change', () => last && renderLog(last));
-$('#log-who').addEventListener('change', () => last && renderLog(last));
+$('#log-account').addEventListener('change', () => last && renderLog(last));
 
 // ── API cost estimate ───────────────────────────────────────────────────────
 const usd = n => n.toLocaleString(undefined, { style: 'currency', currency: 'USD' });
@@ -724,7 +765,7 @@ function renderCostChart(bins, binMs, now) {
 
 // ── pages ───────────────────────────────────────────────────────────────────
 function showPage() {
-  const page = ['overview', 'capacity', 'logs'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'overview';
+  const page = ['overview', 'quota', 'capacity', 'logs', 'users'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'overview';
   document.querySelectorAll('[data-page]').forEach(el => { el.hidden = el.dataset.page !== page; });
   document.querySelectorAll('[data-tab]').forEach(a => (a.dataset.tab === page ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current')));
   if (last) render(last); // charts measure their container, which is 0 wide while hidden

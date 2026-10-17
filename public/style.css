@@ -198,7 +198,7 @@ input:not([type]) { min-width: 240px; }
 /* logs */
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; margin: 12px 0; }
 .tiles .tile { padding: 10px 12px; }
-.tile .label { color: var(--ink-2); font-size: 13px; }
+.tile .label { color: var(--ink-2); font-size: 13px; overflow-wrap: anywhere; }
 .tile .value { font-size: 22px; font-weight: 600; margin-top: 2px; }
 .tile .sub { color: var(--ink-2); font-size: 12px; }
 .trow { display: grid; grid-template-columns: 90px 1.2fr 1.4fr 110px; gap: 16px; padding: 8px 16px; border-top: 1px solid var(--hair); font-variant-numeric: tabular-nums; font-size: 14px; }

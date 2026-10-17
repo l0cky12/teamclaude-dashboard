@@ -79,3 +79,12 @@ test('forAccount keeps only the intervals and shares of that account', () => {
   assert.deepEqual(totals(all, 'accounts'), { a: { requests: 2, tokens: 17, lastAt: 3 } });
   assert.deepEqual(forAccount(ticks, 'nobody'), []);
 });
+
+test('forAccount tells a Codex account from a Claude one sharing its name', () => {
+  const ticks = [
+    { at: 1, accounts: { 'me@x': { requests: 1, tokens: 10, provider: 'codex' } }, clients: {} },
+    { at: 2, accounts: { 'me@x': { requests: 1, tokens: 20 } }, clients: {} },
+  ];
+  assert.deepEqual(forAccount(ticks, 'me@x', 0, 'anthropic').map(t => t.at), [2], 'Claude skips the Codex-marked interval');
+  assert.deepEqual(forAccount(ticks, 'me@x', 0, 'codex').map(t => t.at), [1, 2], 'Codex also keeps legacy rows that carry no mark');
+});

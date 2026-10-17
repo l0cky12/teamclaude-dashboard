@@ -593,8 +593,7 @@ function renderLog(s) {
   renderEvents(eventsFor(events, picked ? idOf(picked) : '', now - range), who, now);
 
   // One account picked: only its share of each interval, so rows and totals are its own.
-  // The request log is keyed by name alone, so two providers sharing an email share these rows.
-  const shown = (who ? forAccount(ticks, who, now - range) : select(ticks, { since: now - range })).slice().reverse();
+  const shown = (who ? forAccount(ticks, who, now - range, picked.provider || 'anthropic') : select(ticks, { since: now - range })).slice().reverse();
   const pollS = Math.round((s.dashboard?.pollMs || 5000) / 1000);
   $('#log-note').textContent = `What happened to each account, and what went through it. Each request row is one ${pollS}-second poll with activity in it. Prompt contents are never recorded.`;
 
